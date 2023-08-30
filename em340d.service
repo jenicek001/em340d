@@ -1,0 +1,12 @@
+[Unit]
+Description=Carlo Gavazzi EM340 RS485 ModBus MQTT Daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/em340d/em340.py
+source /opt/em340d/venv/bin/activate
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
