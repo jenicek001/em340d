@@ -1,10 +1,6 @@
-future==0.18.3
-iso8601==2.0.0
 minimalmodbus==2.1.1
 paho-mqtt==1.6.1
-pkg_resources==0.0.0
 pyserial==3.5
 python-dateutil==2.8.2
 PyYAML==6.0.1
-serial==0.0.97
 six==1.16.0
