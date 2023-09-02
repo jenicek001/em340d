@@ -8,6 +8,7 @@ import json
 import paho.mqtt.client as mqtt
 from datetime import date, datetime, timedelta
 from dateutil import tz
+from logger import log
 
 class EM340:
     def __init__(self, config_file):
