@@ -12,7 +12,7 @@ mqtt:
   topic: em340
 
 logger:
-  log_file: /var/log/en340d.log
+  log_file: /var/log/em340d/em340d.log
   # DEBUG, INFO, WARNING, ERROR, CRITICAL
   log_level: INFO
   log_to_console: True
