@@ -1,5 +1,14 @@
 #/bin/bash
 
+# check if there is user em340, if not, create user and group
+if ! id -u em340 >/dev/null 2>&1; then
+    echo "user em340 not found, creating user and group"
+    groupadd em340
+    useradd -g em340 em340
+else
+    echo "user em340 found"
+fi
+
 # check if venv is created
 if [ ! -d "venv" ]; then
     echo "venv not found, creating venv"
@@ -41,6 +50,9 @@ fi
 
 # copy whole directory to /opt
 cp -r . /opt/em340d
+
+# change owner of /opt/em340d to em340
+chown -R em340:em340 /opt/em340d
 
 # make em340.sh executable
 chmod +x /opt/em340d/em340.sh
