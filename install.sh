@@ -58,6 +58,7 @@ chown -R em340:em340 /opt/em340d
 chmod +x /opt/em340d/em340.sh
 
 systemctl start em340d.service
+sleep 5
 systemctl status em340d.service
 
 # check return code
