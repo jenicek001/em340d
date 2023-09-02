@@ -5,6 +5,7 @@ After=network.target
 [Service]
 Type=simple
 ExecStart=/usr/bin/python3 /opt/em340d/em340.sh
+User=em340
 Restart=always
 
 [Install]
