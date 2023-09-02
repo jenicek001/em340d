@@ -45,8 +45,8 @@ cp -r . /opt/em340d
 # make em340.sh executable
 chmod +x /opt/em340d/em340.sh
 
-systemctl start goodwe2mqtt.service
-systemctl status goodwe2mqtt.service
+systemctl start em340d.service
+systemctl status em340d.service
 
 # check return code
 if [ $? -eq 0 ]; then
