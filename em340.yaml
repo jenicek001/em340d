@@ -3,6 +3,7 @@ config:
   t_delay_ms: 50
   id: em340
   modbus_address: 0x0001
+  name: XXXXXXX
 
 mqtt:
   broker: 
