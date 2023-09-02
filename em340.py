@@ -15,7 +15,7 @@ class EM340:
         try:
             self.em340_config = yaml.load(open(config_file), Loader=yaml.FullLoader)
         except Exception as e:
-            print(f'Error loading YAML file: {e}')
+            log.error(f'Error loading YAML file: {e}')
             sys.exit()
 
         self.device = self.em340_config['config']['device']
@@ -40,10 +40,10 @@ class EM340:
 
     def read_sensors(self):
         while True:
-            print('Reading EM340...')
+            log.debug('Reading EM340...')
             data = {}
             for register in self.em340_config['sensor']:
-                #print(f"Reading {register['name']} at register {register['address']}")
+                #log.info(f"Reading {register['name']} at register {register['address']}")
                 ## Read value from EM340
                 try:
                     #temperature = self.em340.read_register(288, 10) # Registernumber, number of decimals
@@ -56,27 +56,27 @@ class EM340:
                     value = self.em340.read_register(register['address'], signed=signed) # Registernumber, number of decimals
                     if value is None:
                         raise ValueError(f"Missing value for register {register['name']} at address {register['address']}")
-                    #print(value)
+                    #log.info(value)
                     #value = value / 10**register['accuracy_decimals']
-                    #print(register['filters'])
-                    #print(register['filters'][0])
-                    #print(register['filters'][0]['multiply'])
-                    #print(float(register['filters'][0]['multiply']))
+                    #log.info(register['filters'])
+                    #log.info(register['filters'][0])
+                    #log.info(register['filters'][0]['multiply'])
+                    #log.info(float(register['filters'][0]['multiply']))
                     value = value * float(register['multiply'])
                     units = register['unit_of_measurement'] if 'unit_of_measurement' in register else ''
-                    print(f'{register["name"]} {value} {units}')
+                    log.debug(f'{register["name"]} {value} {units}')
                     data[register['id']] = value
                     time.sleep(self.t_delay_seconds)
                 except IOError as err:
-                    print(f'Failed to read from ModBus device at {self.em340.serial.port}: {err}')
+                    log.error(f'Failed to read from ModBus device at {self.em340.serial.port}: {err}')
                 except ValueError as err:
-                    print(f'Error reading register: {err}')
+                    log.error(f'Error reading register: {err}')
                     time.sleep(self.t_delay_seconds)
                 except KeyError as err:
-                    print(f'Error in yaml config file: {err}')
+                    log.error(f'Error in yaml config file: {err}')
                     sys.exit()
                 except KeyboardInterrupt:
-                    print("Keyboard interrupt detected. Exiting...")
+                    log.error("Keyboard interrupt detected. Exiting...")
                     sys.exit()
 
             # Add timestamp in local time as last_seen
@@ -89,5 +89,6 @@ class EM340:
             self.mqtt_client.publish(self.topic, payload)
 
 if __name__ == '__main__':
+    log.info('Starting EM340d...')
     em340 = EM340('em340.yaml')
     em340.read_sensors()
