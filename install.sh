@@ -42,6 +42,9 @@ fi
 # copy whole directory to /opt
 cp -r . /opt/em340d
 
+# make em340.sh executable
+chmod +x /opt/em340d/em340.sh
+
 systemctl start goodwe2mqtt.service
 systemctl status goodwe2mqtt.service
 
