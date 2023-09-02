@@ -36,7 +36,7 @@ class EM340:
         self.mqtt_client = mqtt.Client()
         self.mqtt_client.username_pw_set(self.em340_config['mqtt']['username'], self.em340_config['mqtt']['password'])
         self.mqtt_client.connect(self.em340_config['mqtt']['broker'], self.em340_config['mqtt']['port'])
-        self.topic = self.em340_config['mqtt']['topic']
+        self.topic = self.em340_config['mqtt']['topic'] + '/' + self.em340_config['config']['name']
 
     def read_sensors(self):
         while True:
