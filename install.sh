@@ -31,6 +31,23 @@ else
     echo "venv found"
 fi
 
+# check if user em340 is in group dialout
+if ! id -nG em340 | grep -qw dialout; then
+    echo "user em340 not in group dialout, adding user to group"
+    usermod -a -G dialout em340
+else
+    echo "user em340 found in group dialout"
+fi
+
+# check if there is a directory for logging /var/log/em340d and owned by em340
+if [ ! -d "/var/log/em340d" ]; then
+    echo "directory /var/log/em340d not found, creating directory"
+    mkdir /var/log/em340d
+    chown em340:em340 /var/log/em340d
+else
+    echo "directory /var/log/em340d found"
+fi
+
 # check if service is installed
 if [ ! -f "/etc/systemd/system/em340d.service" ]; then
     echo "service not found, installing service"
