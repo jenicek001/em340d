@@ -39,7 +39,7 @@ class EM340:
         self.topic = self.em340_config['mqtt']['topic'] + '/' + self.em340_config['config']['name']
 
         measurement_mode = self.em340.read_register(0x1103)
-        measurement_mode_type = chr(measurement_mode + 64)
+        measurement_mode_type = chr(measurement_mode + 65)
         log.info(f'Measurement mode: {measurement_mode_type}')
         time.sleep(0.1)
 
