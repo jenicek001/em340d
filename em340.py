@@ -66,12 +66,10 @@ class EM340:
                     units = register['unit_of_measurement'] if 'unit_of_measurement' in register else ''
                     log.debug(f'{register["name"]} {value} {units}')
                     data[register['id']] = value
-                    time.sleep(self.t_delay_seconds)
                 except IOError as err:
                     log.error(f'Failed to read from ModBus device at {self.em340.serial.port}: {err}')
                 except ValueError as err:
                     log.error(f'Error reading register: {err}')
-                    time.sleep(self.t_delay_seconds)
                 except KeyError as err:
                     log.error(f'Error in yaml config file: {err}')
                     sys.exit()
@@ -80,13 +78,17 @@ class EM340:
                     sys.exit()
 
             # Add timestamp in local time as last_seen
-
-
             data['last_seen'] = datetime.now(tz=tz.tzlocal()).isoformat()
+
+            # Read all registers
+            regs = self.em340.read_registers(registeraddress=0x0000, number_of_registers=20)
+            data['all_registers'] = regs
 
             # Publish data to MQTT topic
             payload = json.dumps(data)
             self.mqtt_client.publish(self.topic, payload)
+
+            time.sleep(self.t_delay_seconds)
 
 if __name__ == '__main__':
     log.info('Starting EM340d...')
