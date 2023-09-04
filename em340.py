@@ -38,6 +38,24 @@ class EM340:
         self.mqtt_client.connect(self.em340_config['mqtt']['broker'], self.em340_config['mqtt']['port'])
         self.topic = self.em340_config['mqtt']['topic'] + '/' + self.em340_config['config']['name']
 
+        measurement_mode = self.em340.read_register(0x1103)
+        measurement_mode_type = chr(measurement_mode + 64)
+        log.info(f'Measurement mode: {measurement_mode_type}')
+        time.sleep(0.1)
+
+        measuring_system = self.em340.read_register(0x1002)
+        measurement_system_text = ''
+        if measuring_system == 0:
+            measurement_system_text = '3-phase 4-wire with neutral'
+        elif measuring_system == 1:
+            measurement_system_text = '3-phase 3-wire without neutral'
+        elif measuring_system == 2:
+            measurement_system_text = '2-phase 3-wire'
+        elif measuring_system == 3:
+            measurement_system_text = '1-phase - only for EM330'
+        log.info(f'Measurement system: {measurement_system_text}')
+        time.sleep(0.1)
+
         # change EM340 measurement mode to B
         #self.em340.write_register(0x1103, 1)
         #time.sleep(0.1)
@@ -49,22 +67,6 @@ class EM340:
     def read_sensors(self):
         while True:
             log.debug('Reading EM340...')
-            
-            measurement_mode = self.em340.read_register(0x1103)
-            measurement_mode_type = chr(measurement_mode + 64)
-            log.info(f'Measurement mode: {measurement_mode_type}')
-
-            measuring_system = self.em340.read_register(0x1002)
-            measurement_system_text = ''
-            if measuring_system == 0:
-                measurement_system_text = '3-phase 4-wire with neutral'
-            elif measuring_system == 1:
-                measurement_system_text = '3-phase 3-wire without neutral'
-            elif measuring_system == 2:
-                measurement_system_text = '2-phase 3-wire'
-            elif measuring_system == 3:
-                measurement_system_text = '1-phase - only for EM330'
-            log.info(f'Measurement system: {measurement_system_text}')
 
             data = {}
             for register in self.em340_config['sensor']:
@@ -91,6 +93,8 @@ class EM340:
                     units = register['unit_of_measurement'] if 'unit_of_measurement' in register else ''
                     log.debug(f'{register["name"]} {value} {units}')
                     data[register['id']] = value
+                    time.sleep(self.t_delay_seconds)
+
                 except IOError as err:
                     log.error(f'Failed to read from ModBus device at {self.em340.serial.port}: {err}')
                 except ValueError as err:
@@ -113,8 +117,6 @@ class EM340:
             # Publish data to MQTT topic
             payload = json.dumps(data)
             self.mqtt_client.publish(self.topic, payload)
-
-            time.sleep(self.t_delay_seconds)
 
 if __name__ == '__main__':
     log.info('Starting EM340d...')
