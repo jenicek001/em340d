@@ -38,6 +38,14 @@ class EM340:
         self.mqtt_client.connect(self.em340_config['mqtt']['broker'], self.em340_config['mqtt']['port'])
         self.topic = self.em340_config['mqtt']['topic'] + '/' + self.em340_config['config']['name']
 
+        # change EM340 measurement mode to B
+        self.em340.write_register(0x1103, 1)
+        time.sleep(0.1)
+        
+        # Measuring system = 3-phase 4-wire with neutral
+        self.em340.write_register(0x1002, 0)
+        time.sleep(0.1)
+
     def read_sensors(self):
         while True:
             log.debug('Reading EM340...')
