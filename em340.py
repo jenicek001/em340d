@@ -49,6 +49,23 @@ class EM340:
     def read_sensors(self):
         while True:
             log.debug('Reading EM340...')
+            
+            measurement_mode = self.em340.read_register(0x1103)
+            measurement_mode_type = chr(measurement_mode + 64)
+            log.info(f'Measurement mode: {measurement_mode_type}')
+
+            measuring_system = self.em340.read_register(0x1002)
+            measurement_system_text = ''
+            if measuring_system == 0:
+                measurement_system_text = '3-phase 4-wire with neutral'
+            elif measuring_system == 1:
+                measurement_system_text = '3-phase 3-wire without neutral'
+            elif measuring_system == 2:
+                measurement_system_text = '2-phase 3-wire'
+            elif measuring_system == 3:
+                measurement_system_text = '1-phase - only for EM330'
+            log.info(f'Measurement system: {measurement_system_text}')
+
             data = {}
             for register in self.em340_config['sensor']:
                 #log.info(f"Reading {register['name']} at register {register['address']}")
@@ -89,8 +106,9 @@ class EM340:
             data['last_seen'] = datetime.now(tz=tz.tzlocal()).isoformat()
 
             # Read all registers
-            #regs = self.em340.read_registers(registeraddress=0x0000, number_of_registers=20)
-            #data['all_registers'] = regs
+            regs = self.em340.read_registers(registeraddress=0x0012, number_of_registers=20)
+            data['all_registers_address'] = 0x0012
+            data['all_registers'] = regs
 
             # Publish data to MQTT topic
             payload = json.dumps(data)
