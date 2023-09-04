@@ -89,8 +89,8 @@ class EM340:
             data['last_seen'] = datetime.now(tz=tz.tzlocal()).isoformat()
 
             # Read all registers
-            regs = self.em340.read_registers(registeraddress=0x0000, number_of_registers=20)
-            data['all_registers'] = regs
+            #regs = self.em340.read_registers(registeraddress=0x0000, number_of_registers=20)
+            #data['all_registers'] = regs
 
             # Publish data to MQTT topic
             payload = json.dumps(data)
