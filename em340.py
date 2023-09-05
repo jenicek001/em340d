@@ -38,11 +38,13 @@ class EM340:
         self.mqtt_client.connect(self.em340_config['mqtt']['broker'], self.em340_config['mqtt']['port'])
         self.topic = self.em340_config['mqtt']['topic'] + '/' + self.em340_config['config']['name']
 
+        # TODO send to MQTT to a different subtopic
         measurement_mode = self.em340.read_register(0x1103)
         measurement_mode_type = chr(measurement_mode + 65)
         log.info(f'Measurement mode: {measurement_mode_type}')
         time.sleep(0.1)
 
+        # TODO send to MQTT to a different subtopic
         measuring_system = self.em340.read_register(0x1002)
         measurement_system_text = ''
         if measuring_system == 0:
