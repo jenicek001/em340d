@@ -81,10 +81,50 @@ class EM340:
                     if register['skip'] == True:
                         continue
 
-                    signed = register['value_type'] == "INT16" or register['value_type'] == "INT32"
-                    value = self.em340.read_register(register['address'], signed=signed) # Registernumber, number of decimals
-                    if value is None:
+                    number_of_registers = 0
+                    if register['value_type'] == "INT16" or register['value_type'] == "UINT16":
+                        number_of_registers = 1
+                    elif register['value_type'] == "INT32" or register['value_type'] == "UINT32":
+                        number_of_registers = 2
+                    elif register['value_type'] == "INT64" or register['value_type'] == "UINT64":
+                        number_of_registers = 4
+                    else:
+                        raise ValueError(f"Unknown value type {register['value_type']}")
+                    
+                    # signed = register['value_type'] == "INT16" or register['value_type'] == "INT32" or register['value_type'] == "INT64"
+                    
+                    values = self.em340.read_registers(register['address'], number_of_registers=number_of_registers)
+                    # value = self.em340.read_register(register['address'], signed=signed) # Registernumber, number of decimals
+                    if values is None:
                         raise ValueError(f"Missing value for register {register['name']} at address {register['address']}")
+                    
+                    # For all the formats the byte order (inside the single word) is MSB->LSB.
+                    # In INT32, UINT32 and UINT64 formats, the word order is LSW-> MSW
+                    # a = Exported active power (minus sign)
+                    # b = Imported active power (plus sign)
+                    # c = Imported reactive power (plus sign)
+                    # d = Exported reactive power (minus sign)
+
+                    value = None
+                    if register['value_type'] == "INT16":
+                        value = values[0]
+                        if value & 0x8000:
+                            value = -0x10000 + value
+                    elif register['value_type'] == "UINT16":
+                        value = values[0]
+                    elif register['value_type'] == "INT32":
+                        value = values[0] + (values[1] << 16)
+                        if value & 0x80000000:
+                            value = -0x100000000 + value
+                    elif register['value_type'] == "UINT32":
+                        value = values[0] + (values[1] << 16)
+                    elif register['value_type'] == "INT64":
+                        value = values[0] + (values[1] << 16) + (values[2] << 32) + (values[3] << 48)
+                        if value & 0x8000000000000000:
+                            value = -0x10000000000000000 + value
+                    elif register['value_type'] == "UINT64":
+                        value = values[0] + (values[1] << 16) + (values[2] << 32) + (values[3] << 48)
+
                     #log.info(value)
                     #value = value / 10**register['accuracy_decimals']
                     #log.info(register['filters'])
@@ -112,8 +152,8 @@ class EM340:
             data['last_seen'] = datetime.now(tz=tz.tzlocal()).isoformat()
 
             # Read all registers
-            regs = self.em340.read_registers(registeraddress=0x0012, number_of_registers=20)
-            data['all_registers_address'] = 0x0012
+            regs = self.em340.read_registers(registeraddress=0x0028, number_of_registers=20)
+            data['all_registers_address'] = 0x0028
             data['all_registers'] = regs
 
             # Publish data to MQTT topic
