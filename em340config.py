@@ -2,8 +2,8 @@
 import minimalmodbus
 import serial
 import time
-import yaml # pip install PyYAML
-import sys
+#import yaml # pip install PyYAML
+#import sys
 #import json
 #import paho.mqtt.client as mqtt
 #from datetime import date, datetime, timedelta
