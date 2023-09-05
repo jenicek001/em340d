@@ -44,7 +44,8 @@ if __name__ == '__main__':
 
     # change EM340 measurement mode to B
     print('Changing measurement mode to B')
-    em340.write_register(0x1103, 1)
+    em340.write_register(registeraddress=0x1103, value=1, functioncode=6)
+    #em340.write_register(0x1103, 1)
     time.sleep(0.1)
     
     # Measuring system = 3-phase 4-wire with neutral
