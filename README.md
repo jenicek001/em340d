@@ -11,7 +11,7 @@ On EM340 it is necessary to connect to terminating pin.
 
 git clone https://github.com/jenicek001/em340d.git
 
-cd em340
+cd em340d
 
 modify individual settings in em340.yaml - Serial port with RS485, MQTT broker, etc.
 
