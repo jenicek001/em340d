@@ -9,6 +9,14 @@ else
     echo "user em340 found"
 fi
 
+# check if python package venv is installed
+if ! python3 -c "import venv" >/dev/null 2>&1; then
+    echo "python package venv not found, installing package"
+    python3 -m pip install venv
+else
+    echo "python package venv found"
+fi
+
 # check if venv is created
 if [ ! -d "venv" ]; then
     echo "venv not found, creating venv"
