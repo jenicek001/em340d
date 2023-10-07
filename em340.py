@@ -155,6 +155,7 @@ class EM340:
             regs = self.em340.read_registers(registeraddress=0x0028, number_of_registers=20)
             data['all_registers_address'] = 0x0028
             data['all_registers'] = regs
+            time.sleep(self.t_delay_seconds)
 
             # Publish data to MQTT topic
             payload = json.dumps(data)
