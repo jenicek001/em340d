@@ -14,6 +14,8 @@ if [ ! -d "venv" ]; then
     echo "venv not found, creating venv"
     python3 -m venv venv
 
+    chown -R em340:em340 venv
+
     # activate venv
     source venv/bin/activate
 
@@ -25,6 +27,9 @@ if [ ! -d "venv" ]; then
 
     # deactivate venv
     deactivate
+
+    # find line in venv/bin/activate with string VIRTUAL_ENV and replace it with VIRTUAL_ENV=/opt/em340d/venv
+    sed -i 's/VIRTUAL_ENV=\".*\"/VIRTUAL_ENV=\"\/opt\/em340d\/venv\"/g' venv/bin/activate
 
     echo "venv created"
 else
