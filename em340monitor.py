@@ -109,7 +109,7 @@ class ModBus_Parser_Status(IntEnum): # IntEnum or Enum, for Enum comparisons doe
     MODBUS_PARSER_READ_SLAVE_RESPONSE_CRC_HIGH = 6
     MODBUS_PARSER_READ_SLAVE_RESPONSE_CRC_LOW = 7
 
-class DataPrinter(threading.Thread):
+class ModBusParser(threading.Thread):
     def __init__(self, recv_queue, mqtt_queue, config):
         threading.Thread.__init__(self)
         self.recv_queue = recv_queue
@@ -212,7 +212,7 @@ class DataPrinter(threading.Thread):
                     self.modbus_slave_data.clear()
                 else:
                     #log.debug('read_buffer: size={} {}'.format(len(read_buffer), [f'{i:#0{4}x}' for i in read_buffer]))
-                    log.error(f'modbus_amount_of_bytes error - could be repeated Master Request: recv {hex(byte)}, expected: {hex(self.modbus_amount_of_registers * 2)})' + ', read_buffer: size={} {}'.format(len(read_buffer), [f'{i:#0{4}x}' for i in read_buffer]))
+                    log.warning(f'modbus_amount_of_bytes error - could be repeated Master Request: recv {hex(byte)}, expected: {hex(self.modbus_amount_of_registers * 2)})' + ', read_buffer: size={} {}'.format(len(read_buffer), [f'{i:#0{4}x}' for i in read_buffer]))
                     self.modbus_parser_status = ModBus_Parser_Status.MODBUS_PARSER_WAITING_FOR_MASTER_REQUEST
 
             elif self.modbus_parser_status == ModBus_Parser_Status.MODBUS_PARSER_READ_SLAVE_RESPONSE_DATA:
@@ -328,10 +328,10 @@ if __name__ == '__main__':
     q = queue.Queue()
     mqtt_q = queue.Queue()
     reader = SerialReader(port=device, baudrate=9600, timeout=1, stopbits=serial.STOPBITS_ONE, recv_queue=q)
-    printer = DataPrinter(recv_queue=q, mqtt_queue=mqtt_q, config=em340_config)
+    parser = ModBusParser(recv_queue=q, mqtt_queue=mqtt_q, config=em340_config)
     sender = MqttSender(mqtt_queue=mqtt_q, config=em340_config)
     reader.start()
-    printer.start()
+    parser.start()
     sender.start()
     try:
         # sleep forever and let threads do their job
@@ -342,5 +342,5 @@ if __name__ == '__main__':
             
     except KeyboardInterrupt:
         reader.join()
-        printer.join()
+        parser.join()
         sender.join()
