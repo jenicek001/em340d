@@ -6,10 +6,37 @@ from datetime import timedelta
 import yaml # pip install PyYAML
 import sys
 from logger import log
+import paho.mqtt.client as mqtt
+import json
+import time
 
 start_time = datetime.datetime.now()
 
-read_buffer = bytearray()
+#read_buffer = bytearray()
+
+class MqttSender(threading.Thread):
+    def __init__(self, mqtt_queue, config):
+        threading.Thread.__init__(self)
+        self.mqtt_queue = mqtt_queue
+        self.config = config
+        self.topic = self.config['mqtt']['topic'] + '/' + self.config['config']['name']
+        self.client = mqtt.Client()
+        self.client.username_pw_set(self.config['mqtt']['username'], self.config['mqtt']['password'])
+        self.client.connect(self.config['mqtt']['broker'], self.config['mqtt']['port'], 60)
+        log.info(f'Connected to MQTT broker: {self.config["mqtt"]["broker"]}:{self.config["mqtt"]["port"]}')
+
+    def run(self):
+        while True:
+            try:
+                data = self.mqtt_queue.get()
+                topic = self.topic + '/'
+                topic += data['subtopic'] if 'subtopic' in data else 'unkwnown'
+                log.debug(f'topic: {topic}, data: {data}')
+                self.client.publish(topic, json.dumps(data))
+                #self.mqtt_queue.task_done()
+            except Exception as e:
+                log.error(f'Error publishing to MQTT broker: {e}')
+                pass
 
 # in GoodWe ModBus described CRC ：X^16+X^12+X^5+1
 # ModBus standard: 0xA001
@@ -48,13 +75,13 @@ def calculate_modbus_crc(data: bytes):
   return crc
 
 class SerialReader(threading.Thread):
-    def __init__(self, port, baudrate, timeout, stopbits, queue):
+    def __init__(self, port, baudrate, timeout, stopbits, recv_queue):
         threading.Thread.__init__(self)
         self.port = port
         self.baudrate = baudrate
         self.timeout = timeout
         self.stopbits = stopbits
-        self.queue = queue
+        self.recv_queue = recv_queue
         #self.start_time = datetime.datetime.now()
         #self.last_character_time = self.start_time
         #self.read_buffer = bytearray()
@@ -68,7 +95,7 @@ class SerialReader(threading.Thread):
                 #last_character_delay = current_time - self.last_character_time
                 for c in x:
                     #self.read_buffer.append(c)
-                    self.queue.put((current_time, c))
+                    self.recv_queue.put((current_time, c))
                     self.last_character_time = current_time
 
 from enum import IntEnum, unique
@@ -83,9 +110,9 @@ class ModBus_Parser_Status(IntEnum): # IntEnum or Enum, for Enum comparisons doe
     MODBUS_PARSER_READ_SLAVE_RESPONSE_CRC_LOW = 7
 
 class DataPrinter(threading.Thread):
-    def __init__(self, queue , config):
+    def __init__(self, recv_queue, mqtt_queue, config):
         threading.Thread.__init__(self)
-        self.queue = queue
+        self.recv_queue = recv_queue
         self.last_character_time = datetime.datetime.now()
         self.modbus_parser_status = ModBus_Parser_Status.MODBUS_PARSER_WAITING_FOR_MASTER_REQUEST
         self.modbus_slave_address = 0
@@ -96,34 +123,35 @@ class DataPrinter(threading.Thread):
         self.modbus_slave_crc_high = 0
         self.modbus_slave_crc_low = 0
         self.config = config
+        self.mqtt_queue = mqtt_queue
 
     def run(self):
         last_character_delay = timedelta()
         read_buffer = bytearray() # ModBus packet buffer
         while True:
-            data = self.queue.get() # blocking function to read from queue
+            data = self.recv_queue.get() # blocking function to read from queue
             char_recv_time = data[0]
             byte = data[1]
 
+            read_buffer.append(byte) # add byte to ModBus packet buffer
+            last_character_delay = char_recv_time - self.last_character_time
+            self.last_character_time = char_recv_time
+
+            # print zero-padded byte in 0x00 format
+            #log.debug('recv. byte: {}'.format(f'{byte:#0{4}x}'))
+            log.debug('recv. byte: {} {}'.format(f'{byte:#0{4}x}', last_character_delay))
+
             # synchronization within RS485 data stream - looking for a ModBus Master request
             if self.modbus_parser_status == ModBus_Parser_Status.MODBUS_PARSER_WAITING_FOR_MASTER_REQUEST:
-                last_character_delay = char_recv_time - self.last_character_time
-                read_buffer.append(byte) # add byte to ModBus packet buffer
 
                 # check for a ModBus delay of 4ms between characters (for 9600 baudrate) - see https://minimalmodbus.readthedocs.io/en/stable/serialcommunication.html
                 if last_character_delay > timedelta(milliseconds=4):
-                    # this is first character of the next message
-
-                    # print all the bytes in the buffer and delete the buffer
-                    #log.info('-------------------------')
-                    #log.info('read_buffer: size={} {}'.format(len(read_buffer), read_buffer))
-                    #log.info('read_buffer: size={} {}'.format(len(read_buffer), read_buffer[0:8]))
-
+                    
                     # print all the bytes in the buffer in the zero padded format 0x00 to a single line
-                    log.debug('read_buffer: size={} {}'.format(len(read_buffer), [f'{i:#0{4}x}' for i in read_buffer]))
+                    log.debug('looking for ModBus Master request - read_buffer after 4ms delay: size={} {}'.format(len(read_buffer), [f'{i:#0{4}x}' for i in read_buffer]))
 
                     # decode the ModBus message
-                    if len(read_buffer) == 9: # incl. first character of next message
+                    if len(read_buffer) >= 9: # incl. first characters of next message
                         self.modbus_slave_address = read_buffer[0]
                         self.modbus_function_code = read_buffer[1]
                         self.modbus_register_address = read_buffer[2] << 8 | read_buffer[3]
@@ -140,25 +168,29 @@ class DataPrinter(threading.Thread):
                             #log.debug('modbus_crc: {}'.format(hex(modbus_crc)))
                             #log.debug('calculated_crc: {}'.format(hex(calculated_crc)))
                             #log.debug('calculated_crc_3: {}'.format(hex(calculated_crc_3)))
-                            log.debug(f'waiting for slave registers address: {self.modbus_register_address}, amount: {self.modbus_amount_of_registers}')
+                            log.debug(f'ModBus Master request CRC ok - waiting for slave registers address: {hex(self.modbus_register_address)}, amount of registers: {self.modbus_amount_of_registers}')
                             #self.modbus_parser_status = ModBus_Parser_Status.MODBUS_PARSER_READ_SLAVE_RESPONSE_MODBUS_ADDRESS
                             
                             # last byte is already first byte of slave response (slave address)
-                            if read_buffer[-1] == self.modbus_slave_address:
+                            if read_buffer[8] == self.modbus_slave_address:
                                 self.modbus_parser_status = ModBus_Parser_Status.MODBUS_PARSER_READ_SLAVE_RESPONSE_FUNCTION_CODE
-                            #self.modbus_slave_data.clear()
-                            #self.modbus_slave_data.append(read_buffer[-1]) # last byte is already first byte of slave response
+                            else:
+                                log.error(f'modbus_slave_address error: recv {hex(read_buffer[8])}, expected: {hex(self.modbus_slave_address)})')
+                                # print error with red color terminal text
+                                print('\033[91m' + f'modbus_slave_address error: recv {hex(read_buffer[8])}, expected: {hex(self.modbus_slave_address)})' + '\033[0m')
+                                self.modbus_parser_status = ModBus_Parser_Status.MODBUS_PARSER_WAITING_FOR_MASTER_REQUEST
+                            
                         else:
                             log.error('crc error: modbus_crc={} calculated_crc={}'.format(hex(modbus_crc), hex(calculated_crc)))
+
+                        # captured combination of packets, delete parsed packet from buffer
+                        # keep only characters of the next message (starting with character 9 - first character of the next message)
+                        log.debug('before reduction: size={} {}'.format(len(read_buffer), [f'{i:#0{4}x}' for i in read_buffer]))
+                        read_buffer = read_buffer[8:]
+                        log.debug('reduced read buffer: size={} {}'.format(len(read_buffer), [f'{i:#0{4}x}' for i in read_buffer]))
                     
-                    # captured long packet - clear the buffer
-                    elif len(read_buffer) > 9:
-                        # keep the last byte in the buffer
-                        last_char = read_buffer[-1]
-                        read_buffer.clear()
-                        read_buffer.append(last_char)
-                
-                self.last_character_time = char_recv_time
+                    else:
+                        log.debug('after inter-message delay read_buffer too small: size={} {}, waiting for additional data...'.format(len(read_buffer), [f'{i:#0{4}x}' for i in read_buffer]))
 
             # elif self.modbus_parser_status == ModBus_Parser_Status.MODBUS_PARSER_READ_SLAVE_RESPONSE_MODBUS_ADDRESS:
             #     if byte == self.modbus_slave_address:
@@ -179,7 +211,8 @@ class DataPrinter(threading.Thread):
                     self.modbus_parser_status = ModBus_Parser_Status.MODBUS_PARSER_READ_SLAVE_RESPONSE_DATA
                     self.modbus_slave_data.clear()
                 else:
-                    log.error(f'modbus_amount_of_bytes error: recv {hex(byte)}, expected: {hex(self.modbus_amount_of_registers * 2)})')
+                    #log.debug('read_buffer: size={} {}'.format(len(read_buffer), [f'{i:#0{4}x}' for i in read_buffer]))
+                    log.error(f'modbus_amount_of_bytes error - could be repeated Master Request: recv {hex(byte)}, expected: {hex(self.modbus_amount_of_registers * 2)})' + ', read_buffer: size={} {}'.format(len(read_buffer), [f'{i:#0{4}x}' for i in read_buffer]))
                     self.modbus_parser_status = ModBus_Parser_Status.MODBUS_PARSER_WAITING_FOR_MASTER_REQUEST
 
             elif self.modbus_parser_status == ModBus_Parser_Status.MODBUS_PARSER_READ_SLAVE_RESPONSE_DATA:
@@ -204,17 +237,29 @@ class DataPrinter(threading.Thread):
                 calculated_crc = calculate_crc16(data_for_crc)
                 if calculated_crc == modbus_crc:
                     # log.error(f'modbus_crc: {hex(modbus_crc)} calculated_crc: {hex(calculated_crc)}')
-                    log.debug('modbus_slave_data: {}'.format([f'{i:#0{4}x}' for i in self.modbus_slave_data]))
+                    log.debug('recv. crc ok, modbus_slave_data payload: {} - parsing...'.format([f'{i:#0{4}x}' for i in self.modbus_slave_data]))
                 else:
                     log.error(f'crc error: modbus_crc={hex(modbus_crc)} calculated_crc={hex(calculated_crc)}')
                 self.modbus_parser_status = ModBus_Parser_Status.MODBUS_PARSER_WAITING_FOR_MASTER_REQUEST
+                read_buffer.clear()
 
                 smart_meter_data = {}
                 smart_meter_data['timestamp'] = datetime.datetime.now().isoformat()
                 register_address = self.modbus_register_address
+                if register_address == 0x0000:
+                    smart_meter_data['subtopic'] = 'voltage_current'
+                elif register_address == 0x0012:
+                    smart_meter_data['subtopic'] = 'active_power'
+                elif register_address == 0x004E:
+                    smart_meter_data['subtopic'] = 'total_exported_energy'
+                elif register_address == 0x0034:
+                    smart_meter_data['subtopic'] = 'total_imported_energy'
+                else:
+                    smart_meter_data['subtopic'] = 'unknown'
+
                 while len(self.modbus_slave_data) > 0:
 
-                    log.debug(f'register_address: {register_address}')
+                    log.debug(f'register_address: {hex(register_address)}')
 
                     for register in self.config['sensor']:
                         if register['address'] == register_address:
@@ -262,8 +307,10 @@ class DataPrinter(threading.Thread):
                     register_address += number_of_registers
                     self.modbus_slave_data = self.modbus_slave_data[(number_of_registers*2):]
                         
-                log.info(smart_meter_data)
-
+                # push data to MQTT queue
+                log.debug(f'pushing to mqtt_queue: {smart_meter_data}')
+                self.mqtt_queue.put(smart_meter_data)
+                
 
 if __name__ == '__main__':
     log.info('Starting EM340 ModBus sniffer to MQTT...')
@@ -279,13 +326,21 @@ if __name__ == '__main__':
     t_delay_seconds = em340_config['config']['t_delay_ms'] / 1000.0
 
     q = queue.Queue()
-    reader = SerialReader(port=device, baudrate=9600, timeout=1, stopbits=serial.STOPBITS_ONE, queue=q)
-    printer = DataPrinter(queue=q, config=em340_config)
+    mqtt_q = queue.Queue()
+    reader = SerialReader(port=device, baudrate=9600, timeout=1, stopbits=serial.STOPBITS_ONE, recv_queue=q)
+    printer = DataPrinter(recv_queue=q, mqtt_queue=mqtt_q, config=em340_config)
+    sender = MqttSender(mqtt_queue=mqtt_q, config=em340_config)
     reader.start()
     printer.start()
+    sender.start()
     try:
+        # sleep forever and let threads do their job
         while True:
+            # sleep to reduce CPU usage
+            time.sleep(10)
             pass
+            
     except KeyboardInterrupt:
         reader.join()
         printer.join()
+        sender.join()
