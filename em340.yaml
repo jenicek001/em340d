@@ -98,7 +98,7 @@ sensor:
     value_type: INT32
     accuracy_decimals: 1
     device_class: current
-    multiply: 0.001
+    multiply: 0.0001
     skip: false
 
   - id: current_l2
@@ -109,7 +109,7 @@ sensor:
     value_type: INT32
     accuracy_decimals: 1
     device_class: current
-    multiply: 0.001
+    multiply: 0.0001
     skip: false
   
   - id: current_l3
@@ -120,7 +120,7 @@ sensor:
     value_type: INT32
     accuracy_decimals: 1
     device_class: current
-    multiply: 0.001
+    multiply: 0.0001
     skip: false
 
   - id: active_power_l1
