@@ -32,11 +32,32 @@ class EM340:
         self.em340.serial.timeout = 0.5 # seconds
         self.em340.mode = minimalmodbus.MODE_RTU # rtu or ascii mode
 
-        # MQTT client setup
+        # MQTT client setup with automatic reconnection
         self.mqtt_client = mqtt.Client()
         self.mqtt_client.username_pw_set(self.em340_config['mqtt']['username'], self.em340_config['mqtt']['password'])
-        self.mqtt_client.connect(self.em340_config['mqtt']['broker'], self.em340_config['mqtt']['port'])
+        self.mqtt_client.on_connect = self.on_mqtt_connect
+        self.mqtt_client.on_disconnect = self.on_mqtt_disconnect
+        self.mqtt_client.reconnect_delay_set(min_delay=2, max_delay=30)
         self.topic = self.em340_config['mqtt']['topic'] + '/' + self.em340_config['config']['name']
+        # Start network loop in background thread
+        self.mqtt_client.loop_start()
+        # Try initial connection
+        try:
+            self.mqtt_client.connect(self.em340_config['mqtt']['broker'], self.em340_config['mqtt']['port'])
+        except Exception as e:
+            log.error(f'Initial MQTT connection failed: {e}')
+
+    def on_mqtt_connect(self, client, userdata, flags, rc):
+        if rc == 0:
+            log.info('Connected to MQTT broker.')
+        else:
+            log.error(f'Failed to connect to MQTT broker, return code {rc}')
+
+    def on_mqtt_disconnect(self, client, userdata, rc):
+        if rc != 0:
+            log.warning('Unexpected MQTT disconnection. Will attempt to reconnect.')
+        else:
+            log.info('MQTT client disconnected.')
 
         # TODO send to MQTT to a different subtopic
         measurement_mode = self.em340.read_register(0x1103)
@@ -154,7 +175,12 @@ class EM340:
 
             # Publish data to MQTT topic
             payload = json.dumps(data)
-            self.mqtt_client.publish(self.topic, payload)
+            try:
+                result = self.mqtt_client.publish(self.topic, payload)
+                if result.rc != mqtt.MQTT_ERR_SUCCESS:
+                    log.warning(f'MQTT publish failed with code {result.rc}')
+            except Exception as e:
+                log.error(f'Error publishing to MQTT: {e}')
 
 if __name__ == '__main__':
     log.info('Starting EM340d...')
