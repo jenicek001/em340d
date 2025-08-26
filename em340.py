@@ -67,80 +67,72 @@ class EM340:
         #time.sleep(0.1)
 
     def read_sensors(self):
+        # Group contiguous registers into blocks for efficient reading
+        sensors = [r for r in self.em340_config['sensor'] if not r.get('skip', False)]
+        sensors.sort(key=lambda r: r['address'])
+
+        # Build blocks of contiguous registers
+        blocks = []
+        block = []
+        max_block_size = 20  # EM340 typically allows up to 20 registers per read
+        for sensor in sensors:
+            if not block:
+                block = [sensor]
+                continue
+            prev = block[-1]
+            prev_end = prev['address'] + prev.get('register_count', 1)
+            if sensor['address'] == prev_end and len(block) < max_block_size:
+                block.append(sensor)
+            else:
+                blocks.append(block)
+                block = [sensor]
+        if block:
+            blocks.append(block)
+
         while True:
             log.debug('Reading EM340...')
-
             data = {}
-            for register in self.em340_config['sensor']:
-                #log.info(f"Reading {register['name']} at register {register['address']}")
-                ## Read value from EM340
+            for block in blocks:
+                start_addr = block[0]['address']
+                total_regs = sum(s.get('register_count', 1) for s in block)
                 try:
-                    #temperature = self.em340.read_register(288, 10) # Registernumber, number of decimals
-                    #temperature = self.em340.read_register(0x0000, 20) # Registernumber, number of decimals
-                    #value = self.em340.read_register(register['address'], register['accuracy_decimals']) # Registernumber, number of decimals
-                    if register['skip'] == True:
-                        continue
-
-                    number_of_registers = 0
-                    if register['value_type'] == "INT16" or register['value_type'] == "UINT16":
-                        number_of_registers = 1
-                    elif register['value_type'] == "INT32" or register['value_type'] == "UINT32":
-                        number_of_registers = 2
-                    elif register['value_type'] == "INT64" or register['value_type'] == "UINT64":
-                        number_of_registers = 4
-                    else:
-                        raise ValueError(f"Unknown value type {register['value_type']}")
-                    
-                    # signed = register['value_type'] == "INT16" or register['value_type'] == "INT32" or register['value_type'] == "INT64"
-                    
-                    values = self.em340.read_registers(register['address'], number_of_registers=number_of_registers)
-                    # value = self.em340.read_register(register['address'], signed=signed) # Registernumber, number of decimals
+                    values = self.em340.read_registers(start_addr, number_of_registers=total_regs)
                     if values is None:
-                        raise ValueError(f"Missing value for register {register['name']} at address {register['address']}")
-                    
-                    # For all the formats the byte order (inside the single word) is MSB->LSB.
-                    # In INT32, UINT32 and UINT64 formats, the word order is LSW-> MSW
-                    # a = Exported active power (minus sign)
-                    # b = Imported active power (plus sign)
-                    # c = Imported reactive power (plus sign)
-                    # d = Exported reactive power (minus sign)
-
-                    value = None
-                    if register['value_type'] == "INT16":
-                        value = values[0]
-                        if value & 0x8000:
-                            value = -0x10000 + value
-                    elif register['value_type'] == "UINT16":
-                        value = values[0]
-                    elif register['value_type'] == "INT32":
-                        value = values[0] + (values[1] << 16)
-                        if value & 0x80000000:
-                            value = -0x100000000 + value
-                    elif register['value_type'] == "UINT32":
-                        value = values[0] + (values[1] << 16)
-                    elif register['value_type'] == "INT64":
-                        value = values[0] + (values[1] << 16) + (values[2] << 32) + (values[3] << 48)
-                        if value & 0x8000000000000000:
-                            value = -0x10000000000000000 + value
-                    elif register['value_type'] == "UINT64":
-                        value = values[0] + (values[1] << 16) + (values[2] << 32) + (values[3] << 48)
-
-                    #log.info(value)
-                    #value = value / 10**register['accuracy_decimals']
-                    #log.info(register['filters'])
-                    #log.info(register['filters'][0])
-                    #log.info(register['filters'][0]['multiply'])
-                    #log.info(float(register['filters'][0]['multiply']))
-                    value = value * float(register['multiply'])
-                    units = register['unit_of_measurement'] if 'unit_of_measurement' in register else ''
-                    log.debug(f'{register["name"]} {value} {units}')
-                    data[register['id']] = value
+                        raise ValueError(f"Missing values for block starting at {hex(start_addr)}")
+                    idx = 0
+                    for sensor in block:
+                        reg_count = sensor.get('register_count', 1)
+                        sensor_values = values[idx:idx+reg_count]
+                        idx += reg_count
+                        value = None
+                        vt = sensor['value_type']
+                        if vt == "INT16":
+                            value = sensor_values[0]
+                            if value & 0x8000:
+                                value = -0x10000 + value
+                        elif vt == "UINT16":
+                            value = sensor_values[0]
+                        elif vt == "INT32":
+                            value = sensor_values[0] + (sensor_values[1] << 16)
+                            if value & 0x80000000:
+                                value = -0x100000000 + value
+                        elif vt == "UINT32":
+                            value = sensor_values[0] + (sensor_values[1] << 16)
+                        elif vt == "INT64":
+                            value = sensor_values[0] + (sensor_values[1] << 16) + (sensor_values[2] << 32) + (sensor_values[3] << 48)
+                            if value & 0x8000000000000000:
+                                value = -0x10000000000000000 + value
+                        elif vt == "UINT64":
+                            value = sensor_values[0] + (sensor_values[1] << 16) + (sensor_values[2] << 32) + (sensor_values[3] << 48)
+                        value = value * float(sensor['multiply'])
+                        units = sensor.get('unit_of_measurement', '')
+                        log.debug(f'{sensor["name"]} {value} {units}')
+                        data[sensor['id']] = value
                     time.sleep(self.t_delay_seconds)
-
                 except IOError as err:
                     log.error(f'Failed to read from ModBus device at {self.em340.serial.port}: {err}')
                 except ValueError as err:
-                    log.error(f'Error reading register: {err}')
+                    log.error(f'Error reading block: {err}')
                 except KeyError as err:
                     log.error(f'Error in yaml config file: {err}')
                     sys.exit()
@@ -151,10 +143,13 @@ class EM340:
             # Add timestamp in local time as last_seen
             data['last_seen'] = datetime.now(tz=tz.tzlocal()).isoformat()
 
-            # Read all registers
-            regs = self.em340.read_registers(registeraddress=0x0028, number_of_registers=20)
-            data['all_registers_address'] = 0x0028
-            data['all_registers'] = regs
+            # Optionally read a large block for diagnostics
+            try:
+                regs = self.em340.read_registers(registeraddress=0x0028, number_of_registers=20)
+                data['all_registers_address'] = 0x0028
+                data['all_registers'] = regs
+            except Exception as err:
+                log.error(f'Error reading all registers block: {err}')
             time.sleep(self.t_delay_seconds)
 
             # Publish data to MQTT topic
