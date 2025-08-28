@@ -13,19 +13,23 @@ services:
     # Container runs as dynamically created user matching host user permissions
     # Build args ensure container user has same UID/GID as host user
     
-    # Serial device access - adjust device path as needed
+    # Serial device access - supports both by-id and direct device paths
     devices:
       - /dev/ttyUSB0:/dev/ttyUSB0
+      - /dev/ttyACM0:/dev/ttyACM0
     
-    # For multiple USB-RS485 adapters, use privileged mode instead:
+    # Mount serial device symlinks for stable device IDs
+    volumes:
+      - ./config/em340.yaml:/app/em340.yaml:ro
+      - em340d_logs:/app/logs
+      - /dev/serial:/dev/serial:ro  # Mount serial by-id symlinks
+    
+    # Alternative: For multiple USB-RS485 adapters or complex setups, use privileged mode:
     # privileged: true
     # volumes:
     #   - /dev:/dev
     
     # Configuration and data persistence
-    volumes:
-      - ./config/em340.yaml:/app/em340.yaml:ro
-      - em340d_logs:/app/logs
     
     # Environment variables for configuration
     environment:

@@ -190,7 +190,18 @@ GND           →  GND (if available)
 - Connect EM340 terminating resistor jumper
 - Check voltages: A+ ≈ 4V, B- ≈ 1V relative to GND
 - Use shielded cable for long distances
-- Test connectivity with `ls -la /dev/ttyUSB*`
+
+### Serial Device Path Configuration
+- **Test connectivity**: `ls -la /dev/ttyUSB* /dev/ttyACM*`
+- **Find stable device ID**: `ls -la /dev/serial/by-id/`
+- **Use stable path in .env**:
+  ```bash
+  # Recommended (stable across reboots):
+  SERIAL_DEVICE=/dev/serial/by-id/usb-1a86_USB_Single_Serial_56EC017080-if00
+  
+  # Alternative (may change on reboot):
+  SERIAL_DEVICE=/dev/ttyACM0
+  ```
 
 ## ⚙️ **Configuration Guide**
 
