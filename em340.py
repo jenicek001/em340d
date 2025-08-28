@@ -13,8 +13,10 @@ from config_loader import load_yaml_with_env
 
 class EM340:
     def __init__(self, config_file):
+        log.info(f'Initializing EM340 with config file: {config_file}')
         try:
             self.em340_config = load_yaml_with_env(config_file)
+            log.info('Configuration loaded successfully')
         except Exception as e:
             log.error(f'Error loading YAML file: {e}')
             sys.exit()
@@ -22,6 +24,8 @@ class EM340:
         self.device = self.em340_config['config']['device']
         self.modbus_address = self.em340_config['config']['modbus_address']
         self.t_delay_seconds = self.em340_config['config']['t_delay_ms'] / 1000.0
+        
+        log.info(f'ModBus configuration: device={self.device}, address={self.modbus_address}, delay={self.t_delay_seconds}s')
 
         self.em340 = minimalmodbus.Instrument(self.device, self.modbus_address) # port name, slave address (in decimal)
         self.em340.serial.port # this is the serial port name
@@ -32,19 +36,24 @@ class EM340:
         #self.em340.serial.timeout = 0.05 # seconds
         self.em340.serial.timeout = 0.5 # seconds
         self.em340.mode = minimalmodbus.MODE_RTU # rtu or ascii mode
+        
+        log.info(f'ModBus instrument configured: port={self.device}, baudrate=9600, timeout=0.5s')
 
         # MQTT client setup with automatic reconnection
+        log.info(f'Setting up MQTT client for broker: {self.em340_config["mqtt"]["broker"]}:{self.em340_config["mqtt"]["port"]}')
         self.mqtt_client = mqtt.Client()
         self.mqtt_client.username_pw_set(self.em340_config['mqtt']['username'], self.em340_config['mqtt']['password'])
         self.mqtt_client.on_connect = self.on_mqtt_connect
         self.mqtt_client.on_disconnect = self.on_mqtt_disconnect
         self.mqtt_client.reconnect_delay_set(min_delay=2, max_delay=30)
         self.topic = self.em340_config['mqtt']['topic'] + '/' + self.em340_config['config']['name']
+        log.info(f'MQTT topic configured: {self.topic}')
         # Start network loop in background thread
         self.mqtt_client.loop_start()
         # Try initial connection
         try:
             self.mqtt_client.connect(self.em340_config['mqtt']['broker'], self.em340_config['mqtt']['port'])
+            log.info('MQTT initial connection attempt initiated')
         except Exception as e:
             log.error(f'Initial MQTT connection failed: {e}')
 
@@ -233,6 +242,9 @@ class EM340:
                 log.error(f'Error publishing to MQTT: {e}')
 
 if __name__ == '__main__':
-    log.info('Starting EM340d...')
+    log.info('=== Starting EM340D ModBus to MQTT Gateway ===')
+    log.info('Application startup initiated')
     em340 = EM340('em340.yaml')
+    log.info('EM340 instance created successfully')
+    log.info('Beginning sensor reading loop...')
     em340.read_sensors()

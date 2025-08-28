@@ -47,7 +47,8 @@ if log_to_file:
 if log_to_console:
     # Add a handler to the log object that prints messages to the console.
     stream_handler = logging.StreamHandler()
-    stream_handler.setFormatter(logging.Formatter('%(message)s'))
+    # Include timestamp and level for Docker logs visibility
+    stream_handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s'))
     log.addHandler(stream_handler)
 
 # Log a message at the INFO level.
