@@ -3,7 +3,10 @@ config:
   t_delay_ms: 50
   id: em340
   modbus_address: 0x0001
-  name: XXXXXXX
+  # Carlo Gavazzi EM340 serial number - used as MQTT subtopic identifier
+  # Format: 6 digits + 1 letter (e.g., "235411W")
+  # You can find this on the EM340 device label
+  serial_number: "235411W"
 
 mqtt:
   broker: 

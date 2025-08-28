@@ -46,7 +46,7 @@ class EM340:
         self.mqtt_client.on_connect = self.on_mqtt_connect
         self.mqtt_client.on_disconnect = self.on_mqtt_disconnect
         self.mqtt_client.reconnect_delay_set(min_delay=2, max_delay=30)
-        self.topic = self.em340_config['mqtt']['topic'] + '/' + self.em340_config['config']['name']
+        self.topic = self.em340_config['mqtt']['topic'] + '/' + self.em340_config['config']['serial_number']
         log.info(f'MQTT topic configured: {self.topic}')
         # Start network loop in background thread
         self.mqtt_client.loop_start()
