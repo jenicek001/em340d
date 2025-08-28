@@ -67,17 +67,57 @@ else
 fi
 
 # Check USB devices
-print_info "Checking USB serial devices..."
+print_info "Checking USB serial devices and permissions..."
 if ls /dev/ttyUSB* 2>/dev/null; then
-    print_success "USB serial devices found"
+    print_success "USB serial devices found:"
+    for device in /dev/ttyUSB*; do
+        if [ -e "$device" ]; then
+            ls -la "$device"
+            # Check if current user has access
+            if [ -r "$device" ] && [ -w "$device" ]; then
+                print_success "Current user has access to $device"
+            else
+                print_warning "Current user does not have access to $device"
+                # Check if user is in dialout group
+                if groups $USER | grep -q dialout; then
+                    print_info "User $USER is in dialout group - may need to log out/in"
+                else
+                    print_warning "User $USER is not in dialout group"
+                    print_info "Run: sudo usermod -aG dialout $USER"
+                    print_info "Then log out and back in"
+                fi
+            fi
+        fi
+    done
 else
     print_warning "No /dev/ttyUSB* devices found"
 fi
 
 if ls /dev/ttyACM* 2>/dev/null; then
-    print_success "ACM serial devices found"
+    print_success "ACM serial devices found:"
+    for device in /dev/ttyACM*; do
+        if [ -e "$device" ]; then
+            ls -la "$device"
+            # Check if current user has access
+            if [ -r "$device" ] && [ -w "$device" ]; then
+                print_success "Current user has access to $device"
+            else
+                print_warning "Current user does not have access to $device"
+            fi
+        fi
+    done
 else
     print_info "No /dev/ttyACM* devices found"
+fi
+
+# Check dialout group membership
+print_info "Checking dialout group membership..."
+if groups $USER | grep -q dialout; then
+    print_success "User $USER is in dialout group"
+else
+    print_warning "User $USER is not in dialout group"
+    print_info "Serial devices require dialout group membership"
+    print_info "Fix with: sudo usermod -aG dialout $USER"
 fi
 
 # Check configuration files
