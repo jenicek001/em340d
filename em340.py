@@ -10,6 +10,7 @@ from datetime import date, datetime, timedelta
 from dateutil import tz
 from logger import log
 from config_loader import load_yaml_with_env
+from em340_config_manager import EM340ConfigManager
 
 class EM340:
     def __init__(self, config_file):
@@ -56,6 +57,29 @@ class EM340:
             log.info('MQTT initial connection attempt initiated')
         except Exception as e:
             log.error(f'Initial MQTT connection failed: {e}')
+
+        # Initialize configuration manager
+        config_mqtt_config = {
+            'broker': self.em340_config['mqtt']['broker'],
+            'port': self.em340_config['mqtt']['port'],
+            'username': self.em340_config['mqtt'].get('username', ''),
+            'password': self.em340_config['mqtt'].get('password', ''),
+            'topic': self.em340_config['mqtt']['topic'],
+            'device_id': self.em340_config['config']['serial_number']
+        }
+        
+        self.config_manager = EM340ConfigManager(
+            config_mqtt_config, 
+            self.device, 
+            self.modbus_address
+        )
+        
+        # Start configuration service
+        if self.config_manager.start_config_service():
+            log.info('EM340 configuration service started successfully')
+        else:
+            log.warning('Failed to start EM340 configuration service')
+        
 
     def on_mqtt_connect(self, client, userdata, flags, reason_code, properties=None):
         if reason_code == 0:
@@ -224,6 +248,9 @@ class EM340:
                     sys.exit()
                 except KeyboardInterrupt:
                     log.error("Keyboard interrupt detected. Exiting...")
+                    # Clean shutdown of configuration service
+                    if hasattr(self, 'config_manager'):
+                        self.config_manager.stop_config_service()
                     sys.exit()
                 finally:
                     # Add delay between blocks to avoid overwhelming the device

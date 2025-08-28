@@ -25,12 +25,14 @@ Example: `em340/235411W`
 
 - **ModBus RTU Communication**: Read 30+ sensor values from EM340 meters
 - **MQTT Integration**: Publish data to any MQTT broker with automatic reconnection
+- **Remote Configuration**: Configure EM340 parameters via MQTT topics with validation
 - **Optimized Performance**: 87% reduction in ModBus calls through intelligent block reading
 - **Docker Support**: Easy deployment with Docker Compose
 - **Comprehensive Logging**: Timestamped logs with multiple levels and rotation
 - **Environment Variables**: Flexible configuration via .env files
 - **Health Monitoring**: Built-in health checks and diagnostic tools
 - **Serial Port Management**: Automatic detection and permission handling
+- **Configuration Management**: Backup, restore, and factory reset capabilities
 
 ## 📋 **Quick Start**
 
@@ -276,9 +278,10 @@ mqtt:
 
 ## 📊 **MQTT Data Format**
 
-The application publishes JSON data to the topic: `{MQTT_TOPIC}/{DEVICE_NAME}`
+### Sensor Data Publishing
+The application publishes JSON sensor data to the topic: `{MQTT_TOPIC}/{DEVICE_NAME}`
 
-Example: `em340/EM340_Main`
+Example: `em340/235411W`
 
 ```json
 {
@@ -294,6 +297,40 @@ Example: `em340/EM340_Main`
   "last_seen": "2024-01-15T14:30:25+01:00"
 }
 ```
+
+### Remote Configuration via MQTT 🆕
+The application also supports remote configuration of EM340 parameters via MQTT:
+
+**Configuration Topics:**
+- `{MQTT_TOPIC}/{DEVICE_ID}/config/{parameter}/set` - Set parameter value
+- `{MQTT_TOPIC}/{DEVICE_ID}/config/{parameter}/get` - Get parameter value  
+- `{MQTT_TOPIC}/{DEVICE_ID}/config/batch/set` - Batch configuration
+- `{MQTT_TOPIC}/{DEVICE_ID}/config/backup` - Create configuration backup
+- `{MQTT_TOPIC}/{DEVICE_ID}/config/restore` - Restore configuration
+
+**Example Configuration Commands:**
+```bash
+# Set measurement mode to bidirectional (B)
+mosquitto_pub -h localhost -t "em340/235411W/config/measurement_mode/set" -m "1"
+
+# Set measuring system to 3-phase without neutral  
+mosquitto_pub -h localhost -t "em340/235411W/config/measuring_system/set" -m "1"
+
+# Batch configuration
+mosquitto_pub -h localhost -t "em340/235411W/config/batch/set" -m '{
+  "measurement_mode": 0,
+  "measuring_system": 0,
+  "pt_primary": 400
+}'
+```
+
+**Supported Parameters:**
+- `measuring_system` (0=3P+N, 1=3P, 2=2P+N) - Electrical connection type
+- `measurement_mode` (0=Easy/A, 1=Bidirectional/B) - Energy measurement mode
+- `pt_primary`/`pt_secondary` - Potential transformer ratios
+- `ct_primary`/`ct_secondary` - Current transformer ratios
+
+For complete configuration documentation, see **[MQTT_CONFIGURATION.md](MQTT_CONFIGURATION.md)**.
 
 ## 🛠️ **Troubleshooting**
 
@@ -454,6 +491,30 @@ python -c "import os; print(os.getenv('MQTT_BROKER'))"
 echo "MQTT_BROKER=localhost" >> .env
 echo "SERIAL_DEVICE=/dev/ttyUSB0" >> .env  
 echo "DEVICE_SERIAL_NUMBER=TEST123A" >> .env
+```
+
+#### 8. **MQTT Configuration Issues** 🆕
+```
+Configuration command not applied
+No response from configuration service
+```
+
+**Solutions**:
+```bash
+# Check configuration service status
+./logs.sh -f | grep -i config
+
+# Test MQTT configuration connectivity
+./demo_mqtt_config.sh
+
+# Monitor configuration activity
+mosquitto_sub -h localhost -t "em340/+/config/+/+" -v
+
+# Check available parameters
+mosquitto_pub -h localhost -t "em340/235411W/config/available/get" -m ""
+
+# Verify parameter ranges and values
+# See MQTT_CONFIGURATION.md for valid values
 ```
 
 ### Log Analysis
@@ -674,7 +735,20 @@ docker inspect em340d | grep -i created
 mosquitto_sub -h YOUR_BROKER_IP -t "em340/+" -v
 
 # Should see data like:
-# em340/EM340_Main {"voltage_l1": 230.5, "current_l1": 12.34, ...}
+# em340/235411W {"voltage_l1": 230.5, "current_l1": 12.34, ...}
+```
+
+### Test MQTT Configuration 🆕
+```bash
+# Run interactive configuration tool
+./test_mqtt_config.py
+
+# Run configuration demo
+./test_mqtt_config.py demo
+
+# Manual configuration test
+mosquitto_pub -h localhost -t "em340/235411W/config/measurement_mode/get" -m ""
+mosquitto_sub -h localhost -t "em340/235411W/config/+/+" -v
 ```
 
 ### Test Serial Device Access
@@ -856,11 +930,14 @@ MODBUS_ADDRESS=2
 - **`logs.sh`** - Enhanced log viewer with filtering
 - **`troubleshoot.sh`** - System diagnostic tool
 - **`setup-serial-access.sh`** - Serial port permissions setup
+- **`test_mqtt_config.py`** 🆕 - Interactive MQTT configuration tool
+- **`update.sh`** 🆕 - Automated update script with backup and verification
 
 ### Documentation
 - **`LOGGING_GUIDE.md`** - Comprehensive logging documentation
 - **`DOCKER_SERIAL_FIX.md`** - Docker serial port access solutions
 - **`SERIAL_ACCESS_SOLUTIONS.md`** - Serial port permission solutions
+- **`MQTT_CONFIGURATION.md`** 🆕 - Complete MQTT configuration guide
 
 ## 📞 **Support**
 
@@ -878,6 +955,8 @@ MODBUS_ADDRESS=2
 | Container won't start | Run `./quick-rebuild.sh` |
 | No data published | Check ModBus address and wiring |
 | Log permission errors | Rebuild container: `./quick-rebuild.sh` |
+| Configuration not working | Run `./demo_mqtt_config.sh` |
+| Config service not responding | Check logs: `./logs.sh -f | grep -i config` |
 
 ---
 
