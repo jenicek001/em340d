@@ -141,9 +141,33 @@ else
 fi
 
 # Check docker-compose.yml syntax
-print_info "Checking docker-compose.yml syntax..."
+print_info "Checking docker-compose.yml syntax and user mapping..."
 if $COMPOSE_CMD config > /dev/null 2>&1; then
     print_success "docker-compose.yml syntax is valid"
+    
+    # Check if user mapping is configured
+    if grep -q "user:" docker-compose.yml; then
+        USER_MAPPING=$(grep "user:" docker-compose.yml | sed 's/.*user: *"\([^"]*\)".*/\1/')
+        print_success "User mapping configured: $USER_MAPPING"
+        
+        # Verify the mapping matches em340 user if it exists
+        if id em340 &>/dev/null; then
+            EM340_UID=$(id -u em340)
+            DIALOUT_GID=$(getent group dialout | cut -d: -f3)
+            EXPECTED_MAPPING="$EM340_UID:$DIALOUT_GID"
+            
+            if [ "$USER_MAPPING" = "$EXPECTED_MAPPING" ]; then
+                print_success "User mapping matches em340 user ($EXPECTED_MAPPING)"
+            else
+                print_warning "User mapping ($USER_MAPPING) doesn't match em340 user ($EXPECTED_MAPPING)"
+                print_info "Run: ./deploy-with-user-mapping.sh to fix"
+            fi
+        fi
+    else
+        print_warning "No user mapping configured in docker-compose.yml"
+        print_info "This may cause permission issues with /dev/ttyUSB0"
+        print_info "Run: ./deploy-with-user-mapping.sh to configure"
+    fi
 else
     print_error "docker-compose.yml has syntax errors:"
     $COMPOSE_CMD config

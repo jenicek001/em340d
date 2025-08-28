@@ -22,12 +22,11 @@ RUN mkdir -p /app/logs
 # Copy application code
 COPY *.py ./
 
-# Create non-root user for security and fix permissions
-RUN groupadd -r em340 && useradd -r -g em340 -d /app em340 \
-    && chown -R em340:em340 /app
-
-# Switch to non-root user
-USER em340
+# Set up permissions for external user (em340:dialout = 1001:20)
+# Don't create internal user - container will run as host user
+RUN chmod 755 /app \
+    && chmod 755 /app/logs \
+    && chmod 644 /app/*.py
 
 # Environment variables
 ENV PYTHONUNBUFFERED=1

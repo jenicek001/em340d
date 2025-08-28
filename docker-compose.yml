@@ -6,6 +6,9 @@ services:
     container_name: em340d
     restart: unless-stopped
     
+    # Run as em340 user with dialout group access
+    user: "1001:20"  # em340_uid:dialout_gid
+    
     # Serial device access - adjust device path as needed
     devices:
       - /dev/ttyUSB0:/dev/ttyUSB0
