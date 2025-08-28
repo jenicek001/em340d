@@ -9,11 +9,12 @@ import paho.mqtt.client as mqtt
 from datetime import date, datetime, timedelta
 from dateutil import tz
 from logger import log
+from config_loader import load_yaml_with_env
 
 class EM340:
     def __init__(self, config_file):
         try:
-            self.em340_config = yaml.load(open(config_file), Loader=yaml.FullLoader)
+            self.em340_config = load_yaml_with_env(config_file)
         except Exception as e:
             log.error(f'Error loading YAML file: {e}')
             sys.exit()

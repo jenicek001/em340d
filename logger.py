@@ -2,11 +2,12 @@ import logging
 import logging.handlers
 import yaml
 import sys
+from config_loader import load_yaml_with_env
 
 config_file = 'em340.yaml'
 
 try:
-    config = yaml.load(open(config_file), Loader=yaml.FullLoader)
+    config = load_yaml_with_env(config_file)
 except Exception as e:
     print(f'Error loading YAML file: {e}')
     sys.exit()

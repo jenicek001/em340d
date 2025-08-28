@@ -1,0 +1,363 @@
+config:
+  device: ${SERIAL_DEVICE:/dev/ttyUSB0}
+  t_delay_ms: ${DELAY_MS:50}
+  id: em340
+  modbus_address: ${MODBUS_ADDRESS:0x0001}
+  name: ${DEVICE_NAME:EM340}
+
+mqtt:
+  broker: ${MQTT_BROKER:localhost}
+  port: ${MQTT_PORT:1883}
+  username: ${MQTT_USERNAME:}
+  password: ${MQTT_PASSWORD:}
+  topic: ${MQTT_TOPIC:em340}
+
+logger:
+  log_file: /app/logs/em340d.log
+  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  log_level: ${LOG_LEVEL:INFO}
+  log_to_console: true
+  log_to_file: true
+  log_rotate: true
+  # in bytes
+  log_rotate_size: 1048576
+  log_rotate_count: 5
+
+sensor:
+  - id: voltage_l1
+    name: "Voltage L1-N"
+    address: 0x0000
+    register_count: 2
+    unit_of_measurement: "V"
+    value_type: INT32
+    accuracy_decimals: 1
+    device_class: voltage
+    multiply: 0.1
+    skip: false
+
+  - id: voltage_l2
+    name: "Voltage L2-N"
+    address: 0x0002
+    register_count: 2
+    unit_of_measurement: "V"
+    value_type: INT32
+    accuracy_decimals: 1
+    device_class: voltage
+    multiply: 0.1
+    skip: false
+
+  - id: voltage_l3
+    name: "Voltage L3-N"
+    address: 0x0004
+    register_count: 2
+    unit_of_measurement: "V"
+    value_type: INT32
+    accuracy_decimals: 1
+    device_class: voltage
+    multiply: 0.1
+    skip: false
+
+  - id: voltage_l1_l2
+    name: "Voltage L1-L2"
+    address: 0x0006
+    register_count: 2
+    unit_of_measurement: "V"
+    value_type: INT32
+    accuracy_decimals: 1
+    device_class: voltage
+    multiply: 0.1
+    skip: false
+
+  - id: voltage_l2_l3
+    name: "Voltage L2-L3"
+    address: 0x0008
+    register_count: 2
+    unit_of_measurement: "V"
+    value_type: INT32
+    accuracy_decimals: 1
+    device_class: voltage
+    multiply: 0.1
+    skip: false
+
+  - id: voltage_l3_l1
+    name: "Voltage L3-L1"
+    address: 0x000A
+    register_count: 2
+    unit_of_measurement: "V"
+    value_type: INT32
+    accuracy_decimals: 1
+    device_class: voltage
+    multiply: 0.1
+    skip: false
+  
+  - id: current_l1
+    name: "Current L1"
+    address: 0x000C
+    register_count: 2
+    unit_of_measurement: "A"
+    value_type: INT32
+    accuracy_decimals: 1
+    device_class: current
+    multiply: 0.001
+    skip: false
+
+  - id: current_l2
+    name: "Current L2"
+    address: 0x000E
+    register_count: 2
+    unit_of_measurement: "A"
+    value_type: INT32
+    accuracy_decimals: 1
+    device_class: current
+    multiply: 0.001
+    skip: false
+  
+  - id: current_l3
+    name: "Current L3"
+    address: 0x0010
+    register_count: 2
+    unit_of_measurement: "A"
+    value_type: INT32
+    accuracy_decimals: 1
+    device_class: current
+    multiply: 0.001
+    skip: false
+
+  - id: active_power_l1
+    name: "Active Power L1"
+    address: 0x0012
+    register_count: 2
+    unit_of_measurement: "W"
+    value_type: INT32
+    accuracy_decimals: 1
+    device_class: power
+    multiply: 0.1
+    skip: false
+
+  - id: active_power_l2
+    name: "Active Power L2"
+    address: 0x0014
+    register_count: 2
+    unit_of_measurement: "W"
+    value_type: INT32
+    accuracy_decimals: 1
+    device_class: power
+    multiply: 0.1
+    skip: false
+
+  - id: active_power_l3
+    name: "Active Power L3"
+    address: 0x0016
+    register_count: 2
+    unit_of_measurement: "W"
+    value_type: INT32
+    accuracy_decimals: 1
+    device_class: power
+    multiply: 0.1
+    skip: false
+
+  - id: apparent_power_l1
+    name: "Apparent Power L1"
+    address: 0x0018
+    register_count: 2
+    unit_of_measurement: "VA"
+    value_type: INT32
+    accuracy_decimals: 1
+    device_class: power
+    multiply: 0.1
+    skip: false
+
+  - id: apparent_power_l2
+    name: "Apparent Power L2"
+    address: 0x001A
+    register_count: 2
+    unit_of_measurement: "VA"
+    value_type: INT32
+    accuracy_decimals: 1
+    device_class: power
+    multiply: 0.1
+    skip: false
+
+  - id: apparent_power_l3
+    name: "Apparent Power L3"
+    address: 0x001C
+    register_count: 2
+    unit_of_measurement: "VA"
+    value_type: INT32
+    accuracy_decimals: 1
+    device_class: power
+    multiply: 0.1
+    skip: false
+
+  - id: reactive_power_l1
+    name: "Reactive Power L1"
+    address: 0x001E
+    register_count: 2
+    unit_of_measurement: "var"
+    value_type: INT32
+    accuracy_decimals: 1
+    device_class: power
+    multiply: 0.1
+    skip: false
+
+  - id: reactive_power_l2
+    name: "Reactive Power L2"
+    address: 0x0020
+    register_count: 2
+    unit_of_measurement: "var"
+    value_type: INT32
+    accuracy_decimals: 1
+    device_class: power
+    multiply: 0.1
+    skip: false
+
+  - id: reactive_power_l3
+    name: "Reactive Power L3"
+    address: 0x0022
+    register_count: 2
+    unit_of_measurement: "var"
+    value_type: INT32
+    accuracy_decimals: 1
+    device_class: power
+    multiply: 0.1
+    skip: false
+
+  - id: voltage_l_n_sys
+    name: "Voltage L-N System"
+    address: 0x0024
+    register_count: 2
+    unit_of_measurement: "V"
+    value_type: INT32
+    accuracy_decimals: 1
+    device_class: voltage
+    multiply: 0.1
+    skip: false
+
+  - id: voltage_l_l_sys
+    name: "Voltage L-L System"
+    address: 0x0026
+    register_count: 2
+    unit_of_measurement: "V"
+    value_type: INT32
+    accuracy_decimals: 1
+    device_class: voltage
+    multiply: 0.1
+    skip: false
+
+  - id: active_power_sys
+    name: "Active Power System"
+    address: 0x0028
+    register_count: 2
+    unit_of_measurement: "W"
+    value_type: INT32
+    accuracy_decimals: 1
+    device_class: power
+    multiply: 0.1
+    skip: false
+
+  - id: apparent_power_sys
+    name: "Apparent Power System"
+    address: 0x002A
+    register_count: 2
+    unit_of_measurement: "VA"
+    value_type: INT32
+    accuracy_decimals: 1
+    device_class: power
+    multiply: 0.1
+    skip: false
+
+  - id: reactive_power_sys
+    name: "Reactive Power System"
+    address: 0x002C
+    register_count: 2
+    unit_of_measurement: "var"
+    value_type: INT32
+    accuracy_decimals: 1
+    device_class: power
+    multiply: 0.1
+    skip: false
+
+  - id: power_factor_l1
+    name: "Power Factor L1"
+    address: 0x002E
+    register_count: 1
+    unit_of_measurement: "%"
+    value_type: INT16
+    accuracy_decimals: 1
+    device_class: power_factor
+    multiply: 0.001
+    skip: false
+
+  - id: power_factor_l2
+    name: "Power Factor L2"
+    address: 0x002F
+    register_count: 1
+    unit_of_measurement: "%"
+    value_type: INT16
+    accuracy_decimals: 1
+    device_class: power_factor
+    multiply: 0.001
+    skip: false
+
+  - id: power_factor_l3
+    name: "Power Factor L3"
+    address: 0x0030
+    register_count: 1
+    unit_of_measurement: "%"
+    value_type: INT16
+    accuracy_decimals: 1
+    device_class: power_factor
+    multiply: 0.001
+    skip: false
+
+  - id: power_factor_sys
+    name: "Power Factor System"
+    address: 0x0031
+    register_count: 1
+    unit_of_measurement: "%"
+    value_type: INT16
+    accuracy_decimals: 1
+    device_class: power_factor
+    multiply: 0.001
+    skip: false
+
+  - id: phase_sequence
+    name: "Phase Sequence"
+    address: 0x0032
+    register_count: 1
+    value_type: INT16
+    skip: true
+
+  - id: frequency
+    name: "Frequency"
+    address: 0x0033
+    register_count: 1
+    unit_of_measurement: "Hz"
+    value_type: INT16
+    accuracy_decimals: 1
+    multiply: 0.1
+    skip: false
+
+  - id: total_energy_import
+    name: "Total Energy Import"
+    address: 0x0034
+    register_count: 2
+    unit_of_measurement: "kWh"
+    value_type: INT32
+    accuracy_decimals: 3
+    device_class: energy
+    state_class: total_increasing
+    multiply: 0.1
+    skip: false
+
+  - id: total_energy_export
+    name: "Total Energy Export"
+    address: 0x004E
+    register_count: 2
+    unit_of_measurement: "kWh"
+    value_type: INT32
+    accuracy_decimals: 3
+    device_class: energy
+    state_class: total_increasing
+    multiply: 0.1
+    skip: false

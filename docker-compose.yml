@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  em340d:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: em340d
+    restart: unless-stopped
+    
+    # Serial device access - adjust device path as needed
+    devices:
+      - /dev/ttyUSB0:/dev/ttyUSB0
+    
+    # For multiple USB-RS485 adapters, use privileged mode instead:
+    # privileged: true
+    # volumes:
+    #   - /dev:/dev
+    
+    # Configuration and data persistence
+    volumes:
+      - ./config/em340.yaml:/app/em340.yaml:ro
+      - em340d_logs:/app/logs
+    
+    # Environment variables for configuration
+    environment:
+      - MQTT_BROKER=${MQTT_BROKER:-localhost}
+      - MQTT_PORT=${MQTT_PORT:-1883}
+      - MQTT_USERNAME=${MQTT_USERNAME:-}
+      - MQTT_PASSWORD=${MQTT_PASSWORD:-}
+      - MQTT_TOPIC=${MQTT_TOPIC:-em340}
+      - SERIAL_DEVICE=${SERIAL_DEVICE:-/dev/ttyUSB0}
+      - MODBUS_ADDRESS=${MODBUS_ADDRESS:-1}
+      - DEVICE_NAME=${DEVICE_NAME:-EM340}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - DELAY_MS=${DELAY_MS:-50}
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    
+    # Health check
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import os; exit(0 if os.path.exists(\"/app/em340.yaml\") else 1)'"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    
+    # Network mode (default bridge is usually fine)
+    # network_mode: "host"  # Use if you need host networking
+    
+    # Resource limits (optional)
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.5'
+        reservations:
+          memory: 64M
+          cpus: '0.1'
+
+# Named volumes for data persistence
+volumes:
+  em340d_logs:
+    driver: local
+
+# Optional: Custom networks
+# networks:
+#   em340d_net:
+#     driver: bridge
