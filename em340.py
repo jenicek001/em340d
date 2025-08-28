@@ -41,7 +41,7 @@ class EM340:
 
         # MQTT client setup with automatic reconnection
         log.info(f'Setting up MQTT client for broker: {self.em340_config["mqtt"]["broker"]}:{self.em340_config["mqtt"]["port"]}')
-        self.mqtt_client = mqtt.Client()
+        self.mqtt_client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
         self.mqtt_client.username_pw_set(self.em340_config['mqtt']['username'], self.em340_config['mqtt']['password'])
         self.mqtt_client.on_connect = self.on_mqtt_connect
         self.mqtt_client.on_disconnect = self.on_mqtt_disconnect
@@ -57,14 +57,14 @@ class EM340:
         except Exception as e:
             log.error(f'Initial MQTT connection failed: {e}')
 
-    def on_mqtt_connect(self, client, userdata, flags, rc):
-        if rc == 0:
+    def on_mqtt_connect(self, client, userdata, flags, reason_code, properties=None):
+        if reason_code == 0:
             log.info('Connected to MQTT broker.')
         else:
-            log.error(f'Failed to connect to MQTT broker, return code {rc}')
+            log.error(f'Failed to connect to MQTT broker, return code {reason_code}')
 
-    def on_mqtt_disconnect(self, client, userdata, rc):
-        if rc != 0:
+    def on_mqtt_disconnect(self, client, userdata, flags, reason_code, properties=None):
+        if reason_code != 0:
             log.warning('Unexpected MQTT disconnection. Will attempt to reconnect.')
         else:
             log.info('MQTT client disconnected.')
