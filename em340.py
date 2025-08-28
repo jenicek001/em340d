@@ -94,37 +94,69 @@ class EM340:
 
         # Build blocks of contiguous registers
         blocks = []
-        block = []
+        current_block = []
         max_block_size = 20  # EM340 typically allows up to 20 registers per read
+        max_gap = 5  # Maximum gap between registers to still consider them in the same block
+        
         for sensor in sensors:
-            if not block:
-                block = [sensor]
+            if not current_block:
+                current_block = [sensor]
                 continue
-            prev = block[-1]
-            prev_end = prev['address'] + prev.get('register_count', 1)
-            if sensor['address'] == prev_end and len(block) < max_block_size:
-                block.append(sensor)
+                
+            prev_sensor = current_block[-1]
+            prev_end_addr = prev_sensor['address'] + prev_sensor.get('register_count', 1)
+            current_start_addr = sensor['address']
+            gap = current_start_addr - prev_end_addr
+            
+            # Calculate total registers needed if we add this sensor to current block
+            total_regs_needed = sensor['address'] + sensor.get('register_count', 1) - current_block[0]['address']
+            
+            # Start new block if:
+            # - Gap is too large (inefficient to read empty registers)
+            # - Block would exceed max size
+            # - Gap is negative (overlapping - shouldn't happen but safety check)
+            if gap < 0 or gap > max_gap or total_regs_needed > max_block_size:
+                blocks.append(current_block)
+                current_block = [sensor]
             else:
-                blocks.append(block)
-                block = [sensor]
-        if block:
-            blocks.append(block)
+                current_block.append(sensor)
+                
+        if current_block:
+            blocks.append(current_block)
+
+        # Log block organization for debugging
+        log.info(f'Organized {len(sensors)} sensors into {len(blocks)} blocks:')
+        for i, block in enumerate(blocks):
+            start_addr = block[0]['address']
+            end_addr = block[-1]['address'] + block[-1].get('register_count', 1)
+            total_regs = end_addr - start_addr
+            sensor_names = [s['name'] for s in block]
+            log.info(f'  Block {i+1}: 0x{start_addr:04X}-0x{end_addr-1:04X} ({total_regs} regs) - {", ".join(sensor_names)}')
 
         while True:
             log.debug('Reading EM340...')
             data = {}
             for block in blocks:
                 start_addr = block[0]['address']
-                total_regs = sum(s.get('register_count', 1) for s in block)
+                end_addr = block[-1]['address'] + block[-1].get('register_count', 1)
+                total_regs = end_addr - start_addr
+                
                 try:
+                    log.debug(f'Reading block: 0x{start_addr:04X} to 0x{end_addr-1:04X} ({total_regs} registers)')
                     values = self.em340.read_registers(start_addr, number_of_registers=total_regs)
-                    if values is None:
-                        raise ValueError(f"Missing values for block starting at {hex(start_addr)}")
-                    idx = 0
+                    if values is None or len(values) != total_regs:
+                        raise ValueError(f"Expected {total_regs} values for block starting at {hex(start_addr)}, got {len(values) if values else 0}")
+                    
+                    # Process each sensor in the block
                     for sensor in block:
+                        sensor_start = sensor['address'] - start_addr  # Offset within the block
                         reg_count = sensor.get('register_count', 1)
-                        sensor_values = values[idx:idx+reg_count]
-                        idx += reg_count
+                        sensor_values = values[sensor_start:sensor_start + reg_count]
+                        
+                        if len(sensor_values) != reg_count:
+                            log.warning(f'Sensor {sensor["name"]} expected {reg_count} registers, got {len(sensor_values)}')
+                            continue
+                            
                         value = None
                         vt = sensor['value_type']
                         if vt == "INT16":
@@ -134,44 +166,61 @@ class EM340:
                         elif vt == "UINT16":
                             value = sensor_values[0]
                         elif vt == "INT32":
-                            value = sensor_values[0] + (sensor_values[1] << 16)
-                            if value & 0x80000000:
-                                value = -0x100000000 + value
+                            if len(sensor_values) >= 2:
+                                value = sensor_values[0] + (sensor_values[1] << 16)
+                                if value & 0x80000000:
+                                    value = -0x100000000 + value
+                            else:
+                                log.error(f'INT32 sensor {sensor["name"]} needs 2 registers, got {len(sensor_values)}')
+                                continue
                         elif vt == "UINT32":
-                            value = sensor_values[0] + (sensor_values[1] << 16)
+                            if len(sensor_values) >= 2:
+                                value = sensor_values[0] + (sensor_values[1] << 16)
+                            else:
+                                log.error(f'UINT32 sensor {sensor["name"]} needs 2 registers, got {len(sensor_values)}')
+                                continue
                         elif vt == "INT64":
-                            value = sensor_values[0] + (sensor_values[1] << 16) + (sensor_values[2] << 32) + (sensor_values[3] << 48)
-                            if value & 0x8000000000000000:
-                                value = -0x10000000000000000 + value
+                            if len(sensor_values) >= 4:
+                                value = sensor_values[0] + (sensor_values[1] << 16) + (sensor_values[2] << 32) + (sensor_values[3] << 48)
+                                if value & 0x8000000000000000:
+                                    value = -0x10000000000000000 + value
+                            else:
+                                log.error(f'INT64 sensor {sensor["name"]} needs 4 registers, got {len(sensor_values)}')
+                                continue
                         elif vt == "UINT64":
-                            value = sensor_values[0] + (sensor_values[1] << 16) + (sensor_values[2] << 32) + (sensor_values[3] << 48)
+                            if len(sensor_values) >= 4:
+                                value = sensor_values[0] + (sensor_values[1] << 16) + (sensor_values[2] << 32) + (sensor_values[3] << 48)
+                            else:
+                                log.error(f'UINT64 sensor {sensor["name"]} needs 4 registers, got {len(sensor_values)}')
+                                continue
+                        else:
+                            log.error(f'Unknown value_type {vt} for sensor {sensor["name"]}')
+                            continue
+                            
                         value = value * float(sensor['multiply'])
                         units = sensor.get('unit_of_measurement', '')
-                        log.debug(f'{sensor["name"]} {value} {units}')
+                        log.debug(f'{sensor["name"]} (0x{sensor["address"]:04X}): {value} {units}')
                         data[sensor['id']] = value
-                    time.sleep(self.t_delay_seconds)
+                        
                 except IOError as err:
                     log.error(f'Failed to read from ModBus device at {self.em340.serial.port}: {err}')
+                    # For IOError, continue to next block - might be temporary communication issue
+                    continue
                 except ValueError as err:
-                    log.error(f'Error reading block: {err}')
+                    log.error(f'Error reading block starting at 0x{start_addr:04X}: {err}')
+                    continue
                 except KeyError as err:
                     log.error(f'Error in yaml config file: {err}')
                     sys.exit()
                 except KeyboardInterrupt:
                     log.error("Keyboard interrupt detected. Exiting...")
                     sys.exit()
+                finally:
+                    # Add delay between blocks to avoid overwhelming the device
+                    time.sleep(self.t_delay_seconds)
 
             # Add timestamp in local time as last_seen
             data['last_seen'] = datetime.now(tz=tz.tzlocal()).isoformat()
-
-            # Optionally read a large block for diagnostics
-            try:
-                regs = self.em340.read_registers(registeraddress=0x0028, number_of_registers=20)
-                data['all_registers_address'] = 0x0028
-                data['all_registers'] = regs
-            except Exception as err:
-                log.error(f'Error reading all registers block: {err}')
-            time.sleep(self.t_delay_seconds)
 
             # Publish data to MQTT topic
             payload = json.dumps(data)

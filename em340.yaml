@@ -13,9 +13,9 @@ mqtt:
   topic: em340
 
 logger:
-  log_file: /var/log/em340d/em340d.log
+  log_file: ./em340d.log
   # DEBUG, INFO, WARNING, ERROR, CRITICAL
-  log_level: INFO
+  log_level: DEBUG
   log_to_console: True
   log_to_file: True
   log_rotate: True
@@ -291,6 +291,7 @@ sensor:
   - id: power_factor_l2
     name: "Power Factor L2"
     address: 0x002F
+    register_count: 1
     unit_of_measurement: "%"
     value_type: INT16
     accuracy_decimals: 1
@@ -301,6 +302,7 @@ sensor:
   - id: power_factor_l3
     name: "Power Factor L3"
     address: 0x0030
+    register_count: 1
     unit_of_measurement: "%"
     value_type: INT16
     accuracy_decimals: 1
@@ -311,6 +313,7 @@ sensor:
   - id: power_factor_sys
     name: "Power Factor System"
     address: 0x0031
+    register_count: 1
     unit_of_measurement: "%"
     value_type: INT16
     accuracy_decimals: 1
@@ -321,12 +324,14 @@ sensor:
   - id: phase_sequence
     name: "Phase Sequence"
     address: 0x0032
+    register_count: 1
     value_type: INT16
     skip: true
 
   - id: frequency
     name: "Frequency"
     address: 0x0033
+    register_count: 1
     unit_of_measurement: "Hz"
     value_type: INT16
     accuracy_decimals: 1
@@ -336,6 +341,7 @@ sensor:
   - id: total_energy_import
     name: "Total Energy Import"
     address: 0x0034
+    register_count: 2
     unit_of_measurement: "kWh"
     value_type: INT32
     accuracy_decimals: 3
@@ -347,6 +353,7 @@ sensor:
   - id: total_energy_export
     name: "Total Energy Export"
     address: 0x004E
+    register_count: 2
     unit_of_measurement: "kWh"
     value_type: INT32
     accuracy_decimals: 3
