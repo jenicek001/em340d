@@ -93,7 +93,7 @@ if [ "$RAW" = true ]; then
     if [ "$FOLLOW" = true ]; then
         LOGS_CMD="$LOGS_CMD -f"
     fi
-    LOGS_CMD="$LOGS_CMD --timestamps -t $TAIL_LINES"
+    LOGS_CMD="$LOGS_CMD --tail=$TAIL_LINES"
     if [ -n "$SINCE" ]; then
         LOGS_CMD="$LOGS_CMD --since $SINCE"
     fi
@@ -109,7 +109,7 @@ build_logs_cmd() {
         cmd="$cmd -f"
     fi
     
-    cmd="$cmd -t $TAIL_LINES"
+    cmd="$cmd --tail=$TAIL_LINES"
     
     if [ -n "$SINCE" ]; then
         cmd="$cmd --since $SINCE"
