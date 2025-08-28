@@ -1,6 +1,8 @@
 # EM340D - Carlo Gavazzi EM340 ModBus to MQTT Gateway
 
-A robust daemon that reads data from Carlo Gavazzi EM340 Smart Meters via RS485/ModBus RTU protocol and publishes the data to MQTT brokers. Designed for reliable Data is published to: `{MQTT_TOPIC}/{DEVICE_SERIAL_NUMBER}`
+A robust daemon that reads data from Carlo Gavazzi EM340 Smart Meters via RS485/ModBus RTU protocol and publishes the data to MQTT brokers. Designed for reliable deployment on embedded systems including Raspberry Pi.
+
+Data is published to: `{MQTT_TOPIC}/{DEVICE_SERIAL_NUMBER}`
 
 Example: `em340/235411W`
 
@@ -16,7 +18,8 @@ Example: `em340/235411W`
   "total_energy_import": 12345.678,
   "frequency": 50.0,
   "last_seen": "2024-01-15T14:30:25+01:00"
-}x systems including Raspberry Pi.
+}
+```
 
 ## 🔧 **Features**
 
