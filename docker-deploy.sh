@@ -35,17 +35,27 @@ print_error() {
 check_docker() {
     if ! command -v docker &> /dev/null; then
         print_error "Docker is not installed. Please install Docker first."
-        print_info "Visit: https://docs.docker.com/get-docker/"
+        print_info "For Raspberry Pi OS, run: curl -fsSL https://get.docker.com -o get-docker.sh && sudo sh get-docker.sh"
+        print_info "Then add your user to docker group: sudo usermod -aG docker $USER"
         exit 1
     fi
 
-    if ! command -v docker-compose &> /dev/null; then
+    # Check for Docker Compose V2 (docker compose) first, then legacy (docker-compose)
+    if docker compose version &> /dev/null; then
+        COMPOSE_CMD="docker compose"
+        print_success "Docker Compose V2 (docker compose) is available"
+    elif command -v docker-compose &> /dev/null; then
+        COMPOSE_CMD="docker-compose"
+        print_success "Docker Compose V1 (docker-compose) is available"
+        print_warning "Consider upgrading to Docker Compose V2 for better performance"
+    else
         print_error "Docker Compose is not installed. Please install Docker Compose first."
-        print_info "Visit: https://docs.docker.com/compose/install/"
+        print_info "For Raspberry Pi OS with Docker Desktop or recent Docker Engine:"
+        print_info "Docker Compose V2 should be included. Try: docker compose version"
+        print_info "If not available, install: sudo apt-get update && sudo apt-get install docker-compose-plugin"
+        print_info "Or for legacy V1: sudo pip3 install docker-compose"
         exit 1
     fi
-
-    print_success "Docker and Docker Compose are available"
 }
 
 # Create necessary directories
@@ -104,7 +114,7 @@ check_device() {
 # Build and start the application
 deploy() {
     print_info "Building Docker image..."
-    if docker-compose build; then
+    if $COMPOSE_CMD build; then
         print_success "Docker image built successfully"
     else
         print_error "Failed to build Docker image"
@@ -112,7 +122,7 @@ deploy() {
     fi
 
     print_info "Starting EM340D container..."
-    if docker-compose up -d; then
+    if $COMPOSE_CMD up -d; then
         print_success "Container started successfully"
     else
         print_error "Failed to start container"
@@ -123,14 +133,14 @@ deploy() {
     sleep 5
 
     # Check container status
-    if docker-compose ps | grep -q "Up"; then
+    if $COMPOSE_CMD ps | grep -q "Up"; then
         print_success "EM340D is running successfully"
-        print_info "View logs with: docker-compose logs -f"
-        print_info "Stop with: docker-compose down"
-        print_info "Restart with: docker-compose restart"
+        print_info "View logs with: $COMPOSE_CMD logs -f"
+        print_info "Stop with: $COMPOSE_CMD down"
+        print_info "Restart with: $COMPOSE_CMD restart"
     else
         print_error "Container failed to start properly"
-        print_info "Check logs with: docker-compose logs"
+        print_info "Check logs with: $COMPOSE_CMD logs"
         exit 1
     fi
 }
@@ -152,10 +162,10 @@ show_usage() {
     echo "  logs/              - Application logs directory"
     echo ""
     echo "Commands after deployment:"
-    echo "  docker-compose logs -f     - View live logs"
-    echo "  docker-compose restart     - Restart service"
-    echo "  docker-compose down        - Stop and remove container"
-    echo "  docker-compose pull        - Update to latest image"
+    echo "  $COMPOSE_CMD logs -f       - View live logs"
+    echo "  $COMPOSE_CMD restart       - Restart service"
+    echo "  $COMPOSE_CMD down          - Stop and remove container"
+    echo "  $COMPOSE_CMD pull          - Update to latest image"
 }
 
 # Main execution

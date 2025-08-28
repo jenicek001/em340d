@@ -52,16 +52,6 @@ services:
     
     # Network mode (default bridge is usually fine)
     # network_mode: "host"  # Use if you need host networking
-    
-    # Resource limits (optional)
-    deploy:
-      resources:
-        limits:
-          memory: 128M
-          cpus: '0.5'
-        reservations:
-          memory: 64M
-          cpus: '0.1'
 
 # Named volumes for data persistence
 volumes:

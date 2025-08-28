@@ -87,13 +87,13 @@ mqtt:
 
 ```bash
 # Build and start
-docker-compose up -d
+docker compose up -d
 
 # Check status
-docker-compose ps
+docker compose ps
 
 # View logs
-docker-compose logs -f
+docker compose logs -f
 ```
 
 ## USB Device Access
@@ -135,10 +135,10 @@ groups | grep dialout
 ### View Logs
 ```bash
 # Live logs
-docker-compose logs -f
+docker compose logs -f
 
 # Last 100 lines
-docker-compose logs --tail=100
+docker compose logs --tail=100
 
 # Specific service logs
 docker logs em340d
@@ -147,25 +147,25 @@ docker logs em340d
 ### Control Container
 ```bash
 # Stop
-docker-compose down
+docker compose down
 
 # Start
-docker-compose up -d
+docker compose up -d
 
 # Restart
-docker-compose restart
+docker compose restart
 
 # Update to latest image
-docker-compose pull && docker-compose up -d
+docker compose pull && docker compose up -d
 ```
 
 ### Debug Container
 ```bash
 # Execute shell in running container
-docker-compose exec em340d /bin/bash
+docker compose exec em340d /bin/bash
 
 # Run one-off commands
-docker-compose run --rm em340d python -c "import yaml; print('OK')"
+docker compose run --rm em340d python -c "import yaml; print('OK')"
 ```
 
 ## Configuration Examples
@@ -199,8 +199,8 @@ cp em340.yaml.template meter2/config/em340.yaml
 cp docker-compose.yml meter2/
 
 # Edit configurations for each meter
-cd meter1 && docker-compose up -d
-cd ../meter2 && docker-compose up -d
+cd meter1 && docker compose up -d
+cd ../meter2 && docker compose up -d
 ```
 
 ### Remote MQTT Broker with TLS
@@ -222,7 +222,7 @@ Docker Compose includes health checks:
 
 ```bash
 # Check health status
-docker-compose ps
+docker compose ps
 
 # Health check logs
 docker inspect em340d | grep -A 10 Health
@@ -246,17 +246,17 @@ docker stats em340d
 
 1. **Check logs**:
    ```bash
-   docker-compose logs
+   docker compose logs
    ```
 
 2. **Verify configuration**:
    ```bash
-   docker-compose config
+   docker compose config
    ```
 
 3. **Test configuration**:
    ```bash
-   docker-compose run --rm em340d python -c "
+   docker compose run --rm em340d python -c "
    from config_loader import load_yaml_with_env
    config = load_yaml_with_env('em340.yaml')
    print('Config loaded successfully')
@@ -282,7 +282,7 @@ docker stats em340d
 3. **Test serial communication**:
    ```bash
    # In container
-   docker-compose exec em340d python -c "
+   docker compose exec em340d python -c "
    import serial
    ser = serial.Serial('/dev/ttyUSB0', 9600)
    print('Serial device opened successfully')
@@ -298,7 +298,7 @@ docker stats em340d
    mosquitto_pub -h your-broker -u username -P password -t test -m "hello"
    
    # From container
-   docker-compose exec em340d python -c "
+   docker compose exec em340d python -c "
    import paho.mqtt.client as mqtt
    client = mqtt.Client()
    client.connect('your-broker', 1883)
