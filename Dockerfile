@@ -22,11 +22,16 @@ RUN mkdir -p /app/logs
 # Copy application code
 COPY *.py ./
 
-# Create matching user and group for host em340 user (1001:20)
-# This ensures proper file permissions for volumes
-RUN groupadd -g 20 dialout_container 2>/dev/null || true \
-    && groupadd -g 1001 em340_container 2>/dev/null || true \
-    && useradd -u 1001 -g 1001 -G 20 -d /app -s /bin/bash em340_container \
+# Create matching user and group for host user permissions
+# Use build arguments to avoid hardcoding UIDs
+ARG USER_ID=1000
+ARG GROUP_ID=1000
+ARG DIALOUT_GID=20
+
+# Create groups and user with dynamic IDs
+RUN groupadd -g ${DIALOUT_GID} dialout_container 2>/dev/null || true \
+    && groupadd -g ${GROUP_ID} em340_container 2>/dev/null || true \
+    && useradd -u ${USER_ID} -g ${GROUP_ID} -G ${DIALOUT_GID} -d /app -s /bin/bash em340_container \
     && chown -R em340_container:em340_container /app \
     && chmod 755 /app \
     && chmod 755 /app/logs \

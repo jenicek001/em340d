@@ -93,14 +93,18 @@ Example: `em340/235411W`
 
 4. **Set up serial port access**:
    ```bash
-   # Add current user to dialout group
-   sudo usermod -aG dialout $USER
+   # Automated setup: configures user IDs and serial access
+   ./setup-docker-user.sh
    
-   # Create em340 user for container
-   sudo useradd -m -G dialout em340
+   # This script will:
+   # - Add your current user to dialout group
+   # - Update .env with your user ID/group ID  
+   # - Configure proper container permissions
+   # - Detect dialout group ID automatically
    
-   # Or use automated setup
-   sudo ./setup-serial-access.sh
+   # Manual alternative (if you prefer):
+   # sudo usermod -aG dialout $USER
+   # # Then update .env with: USER_ID=$(id -u), GROUP_ID=$(id -g)
    ```
 
 5. **Deploy with Docker**:
@@ -291,17 +295,22 @@ PermissionError: [Errno 13] Permission denied: '/dev/ttyUSB0'
 
 **Solutions**:
 ```bash
-# Check device exists and permissions
+# Use automated setup (recommended)
+./setup-docker-user.sh
+
+# Or manual setup:
+# 1. Check device exists and permissions
 ls -la /dev/ttyUSB*
 
-# Add user to dialout group
+# 2. Add current user to dialout group  
 sudo usermod -aG dialout $USER
-sudo usermod -aG dialout em340  # For Docker
 
-# Log out and back in, then test
-groups $USER  # Should show dialout
+# 3. Update .env with your user IDs
+echo "USER_ID=$(id -u)" >> .env
+echo "GROUP_ID=$(id -g)" >> .env
+echo "DIALOUT_GID=$(getent group dialout | cut -d: -f3)" >> .env
 
-# For Docker, rebuild container
+# 4. Log out and back in, then rebuild container
 ./quick-rebuild.sh
 ```
 

@@ -3,11 +3,15 @@ services:
     build: 
       context: .
       dockerfile: Dockerfile
+      args:
+        USER_ID: ${USER_ID:-1000}
+        GROUP_ID: ${GROUP_ID:-1000}
+        DIALOUT_GID: ${DIALOUT_GID:-20}
     container_name: em340d
     restart: unless-stopped
     
-    # Container runs as internal em340_container user (UID 1001, GID 20)
-    # which matches host em340 user permissions
+    # Container runs as dynamically created user matching host user permissions
+    # Build args ensure container user has same UID/GID as host user
     
     # Serial device access - adjust device path as needed
     devices:
