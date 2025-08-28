@@ -125,6 +125,29 @@ Example: `em340/235411W`
    ./troubleshoot.sh
    ```
 
+#### 🔄 **Auto-Start on Boot (Optional)**
+
+To make EM340D start automatically when your Raspberry Pi reboots:
+
+```bash
+# Run the auto-start installation script
+./install-autostart.sh
+
+# Or manually enable Docker auto-start (simple method)
+sudo systemctl enable docker
+docker compose up -d  # Container will restart automatically
+```
+
+**Service Management:**
+```bash
+# Control the service easily
+./em340d-service.sh start    # Start service
+./em340d-service.sh stop     # Stop service  
+./em340d-service.sh status   # Check status
+./em340d-service.sh logs     # View logs
+./em340d-service.sh test     # Test MQTT connectivity
+```
+
 #### 📦 **Direct Python Installation**
 
 1. **Install system dependencies**:
@@ -362,6 +385,77 @@ WARN: the attribute `version` is obsolete
 
 **Solution**: Already fixed in current version. Update your `docker-compose.yml`.
 
+#### 6. **Configuration File Errors**
+```
+Error loading YAML file: 'config'
+KeyError: 'mqtt'
+KeyError: 'broker' 
+```
+
+**Solutions**:
+```bash
+# Check configuration file exists
+ls -la config/em340.yaml em340.yaml
+
+# Validate YAML syntax
+python -c "import yaml; yaml.load(open('config/em340.yaml'), Loader=yaml.FullLoader)"
+
+# Check for missing sections
+grep -A5 "^config:" config/em340.yaml
+grep -A5 "^mqtt:" config/em340.yaml  
+grep -A5 "^sensor:" config/em340.yaml
+
+# Verify environment variables
+env | grep -E "(MQTT_|SERIAL_|MODBUS_|DEVICE_)"
+
+# Reset configuration from template
+cp .env.template .env.new
+cp em340.yaml.template em340.yaml.new
+# Compare and merge: diff .env .env.new
+```
+
+**Required Configuration Sections:**
+```yaml
+# Minimum required structure
+config:
+  device: /dev/ttyUSB0         # Required
+  modbus_address: 1            # Required  
+  t_delay_ms: 50              # Required
+  serial_number: EM340_TEST   # Required
+
+mqtt:
+  broker: localhost           # Required
+  port: 1883                  # Required
+  username: ""                # Optional (can be empty)
+  password: ""                # Optional (can be empty)  
+  topic: em340               # Required
+
+sensor: []                    # Required (array, can be empty for testing)
+```
+
+#### 7. **Environment Variable Issues**
+```
+Required environment variable 'MQTT_BROKER' is not set
+```
+
+**Solutions**:
+```bash
+# Check .env file exists and has values
+cat .env | grep MQTT_BROKER
+
+# Verify environment variable loading
+docker compose config  # Shows resolved configuration
+
+# Test without Docker
+export MQTT_BROKER=localhost
+python -c "import os; print(os.getenv('MQTT_BROKER'))"
+
+# Fix missing required variables
+echo "MQTT_BROKER=localhost" >> .env
+echo "SERIAL_DEVICE=/dev/ttyUSB0" >> .env  
+echo "DEVICE_SERIAL_NUMBER=TEST123A" >> .env
+```
+
 ### Log Analysis
 
 #### Monitor Application Startup
@@ -424,18 +518,153 @@ docker compose exec em340d ls -la /dev/ttyUSB0
 ```
 
 ### Updates and Maintenance
+
+#### 🔄 **Updating EM340D**
+
+**Standard Update Process:**
 ```bash
-# Update application
-git pull
+# Stop the service (if using systemd)
+./em340d-service.sh stop
+
+# Or stop Docker manually
+docker compose down
+
+# Pull latest changes from GitHub
+git pull origin main
+
+# Rebuild and restart with new version
 ./quick-rebuild.sh
 
+# Verify the update
+./em340d-service.sh status
+```
+
+**Check for Updates:**
+```bash
+# Check if updates are available
+git fetch origin
+git status
+
+# Show what's changed since your version
+git log HEAD..origin/main --oneline
+
+# Show differences in files
+git diff HEAD..origin/main
+```
+
+#### 🚨 **Update Scenarios**
+
+**1. Configuration File Changes:**
+```bash
+# If configuration templates change
+cp .env.template .env.new
+cp em340.yaml.template em340.yaml.new
+
+# Compare with your current settings
+diff .env .env.new
+diff em340.yaml em340.yaml.new
+
+# Merge changes manually, then cleanup
+rm .env.new em340.yaml.new
+```
+
+**2. Breaking Changes:**
+```bash
+# For major updates, backup your configuration
+cp .env .env.backup
+cp em340.yaml em340.yaml.backup
+
+# Follow migration guide in release notes
+git log --grep="BREAKING" --oneline
+
+# Test with backup configuration if needed
+```
+
+**3. Docker Image Updates:**
+```bash
+# Force rebuild with no cache (for system dependencies)
+./quick-rebuild.sh --no-cache
+
+# Or manually:
+docker compose build --no-cache
+docker compose up -d
+```
+
+#### 📋 **Update Checklist**
+
+**Before Updating:**
+- [ ] Check current version: `git log --oneline -1`
+- [ ] Backup configuration: `cp .env .env.backup`
+- [ ] Note current container status: `docker compose ps`
+- [ ] Check application logs for issues: `./logs.sh -t 20`
+
+**After Updating:**
+- [ ] Verify service starts: `./em340d-service.sh status`
+- [ ] Test MQTT connectivity: `./test-mqtt-connectivity.sh`
+- [ ] Check for errors: `./logs.sh -t 10 -l ERROR`
+- [ ] Verify data publishing: `mosquitto_sub -h localhost -t em340/+`
+- [ ] Test serial device access: `./test-serial-docker.sh`
+
+#### 🔧 **Maintenance Tasks**
+
+**Regular Maintenance (Monthly):**
+```bash
 # Clean up Docker resources
 docker system prune -f
 
-# Reset everything (deletes data!)
+# Check log sizes
+du -sh logs/
+docker system df
+
+# Update system packages (Raspberry Pi)
+sudo apt update && sudo apt upgrade -y
+
+# Check for EM340D updates
+git fetch && git status
+```
+
+**Log Management:**
+```bash
+# View disk usage
+df -h
+docker system df
+
+# Clean old logs (Docker handles rotation)
+# Manual log cleanup if needed:
+docker compose down
+docker volume ls | grep logs
+# docker volume rm em340d_em340d_logs  # Only if needed
+```
+
+**Reset Everything (Nuclear Option):**
+```bash
+# WARNING: This deletes all data and logs!
+./em340d-service.sh stop
 docker compose down -v
 docker system prune -a -f
+rm -f .env em340.yaml  # Remove local config
+git pull
+cp .env.template .env  # Reconfigure from scratch
+cp em340.yaml.template em340.yaml
 ```
+
+#### 📝 **Version Information**
+
+**Check Current Version:**
+```bash
+# Git information
+git log --oneline -5
+git describe --tags --always
+
+# Docker image information  
+docker compose images
+docker inspect em340d | grep -i created
+```
+
+**Release Notes:**
+- Check GitHub releases: https://github.com/jenicek001/em340d/releases
+- Review CHANGELOG.md for version-specific changes
+- Monitor for security updates and bug fixes
 
 ## 🧪 **Testing and Validation**
 
@@ -463,7 +692,121 @@ sudo stty -F /dev/ttyUSB0 9600 raw -echo
 python em340config.py  # Configure EM340 meter settings
 ```
 
-## 🔧 **Advanced Configuration**
+## � **Reliability and Retry Mechanisms**
+
+### MQTT Resilience ✅
+The application has robust MQTT reconnection capabilities:
+
+- **Automatic Reconnection**: 2-30 seconds with exponential backoff
+- **Background Monitoring**: Connection managed in separate thread  
+- **Publish Resilience**: Failed publishes logged but don't crash application
+- **Network Recovery**: Automatically resumes when MQTT broker returns
+
+```python
+# MQTT reconnection settings (built-in)
+min_delay: 2 seconds     # Initial retry delay
+max_delay: 30 seconds    # Maximum retry delay  
+automatic: yes           # Background reconnection
+```
+
+### ModBus Connection ⚠️
+Current ModBus handling has some limitations:
+
+**What Works:**
+- **Timeout Protection**: 500ms timeout per operation prevents hanging
+- **Block-Level Recovery**: Failed blocks skipped, other sensors continue
+- **Rate Limiting**: 50ms delay between operations prevents device overload
+
+**Limitations:**
+- **No USB reconnection**: Device disconnect requires container restart
+- **No automatic retry**: Failed reads are skipped until next cycle
+- **Fixed timeout**: Not configurable per sensor type
+
+```yaml
+# Current ModBus settings
+config:
+  t_delay_ms: 50           # Delay between ModBus operations
+  # Serial timeout: 500ms  # Hard-coded in application
+```
+
+**Improvement Suggestions:**
+1. Add configurable ModBus timeouts
+2. Implement USB device reconnection detection
+3. Add configurable retry counts for failed reads
+
+### Container-Level Recovery ✅
+Multiple layers ensure service availability:
+
+```yaml
+# Docker auto-restart
+restart: unless-stopped
+
+# Health monitoring  
+healthcheck:
+  interval: 30s
+  retries: 3
+  
+# Systemd integration
+Restart: always
+```
+
+### Configuration Error Handling ✅
+The application has comprehensive configuration validation:
+
+**Application Startup:**
+- **Missing config file**: Application exits with clear error message
+- **Missing YAML sections**: Application exits immediately with KeyError details
+- **Missing required keys**: Application exits with specific missing parameter name
+- **Invalid environment variables**: Application exits with validation error
+
+**Runtime Configuration Errors:**
+- **Missing sensor parameters**: Application exits during sensor processing with KeyError
+- **Invalid sensor configuration**: Application logs error and exits gracefully
+
+```python
+# Configuration validation examples:
+try:
+    config = load_yaml_with_env('em340.yaml')
+    device = config['config']['device']       # Required - will exit if missing
+    broker = config['mqtt']['broker']         # Required - will exit if missing
+except KeyError as e:
+    log.error(f'Error in yaml config file: {e}')
+    sys.exit()  # Clean application exit
+```
+
+**Environment Variable Validation:**
+```yaml
+# Required variables (no default) - will exit if missing
+device: ${SERIAL_DEVICE}
+
+# Variables with defaults - will use default if missing  
+broker: ${MQTT_BROKER:localhost}
+port: ${MQTT_PORT:1883}
+```
+
+**Behavior Summary:**
+- **Startup errors**: Application exits immediately with descriptive error
+- **Runtime sensor errors**: Application exits during sensor initialization
+- **Docker auto-restart**: Container automatically restarts after configuration fix
+- **Log visibility**: All configuration errors clearly logged before exit
+
+## �🔧 **Advanced Configuration**
+
+### Reliability Tuning
+```yaml
+# Adjust for your network conditions
+config:
+  t_delay_ms: 100         # Increase for unreliable serial connections
+  
+# MQTT settings for poor connectivity  
+mqtt:
+  broker: 192.168.1.100   # Use IP instead of hostname for faster resolution
+  port: 1883              # Standard port
+  
+# Enhanced logging for troubleshooting
+logger:
+  log_level: DEBUG        # Detailed connection information
+```
 
 ### Custom Sensor Selection
 Edit `config/em340.yaml` to skip unwanted sensors:
