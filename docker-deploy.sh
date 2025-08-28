@@ -121,6 +121,15 @@ deploy() {
         exit 1
     fi
 
+    print_info "Testing Docker image dependencies..."
+    if $COMPOSE_CMD run --rm em340d python -c "import minimalmodbus, paho.mqtt.client, yaml; print('All dependencies imported successfully')"; then
+        print_success "Docker image dependencies verified"
+    else
+        print_error "Docker image dependencies test failed"
+        print_info "Check build logs and requirements.txt"
+        exit 1
+    fi
+
     print_info "Starting EM340D container..."
     if $COMPOSE_CMD up -d; then
         print_success "Container started successfully"
