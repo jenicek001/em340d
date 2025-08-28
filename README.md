@@ -294,10 +294,18 @@ ERROR: Initial MQTT connection failed: [Errno 111] Connection refused
 ```
 
 **Solutions**:
-- ✅ Check MQTT broker is running: `mosquitto_pub -h YOUR_BROKER_IP -t test -m "test"`
-- ✅ Verify MQTT_BROKER IP address in `.env` file
-- ✅ Check firewall settings on broker
-- ✅ Test with simple MQTT client: `mosquitto_sub -h YOUR_BROKER_IP -t em340/+`
+- ✅ **Check MQTT broker is running**: `mosquitto_pub -h localhost -t test -m "test"`
+- ✅ **For Docker deployment**: Container uses host networking - broker should be on `localhost`
+- ✅ **Verify .env configuration**:
+  ```bash
+  # With host networking (recommended):
+  MQTT_BROKER=localhost
+  
+  # Or use Raspberry Pi's IP address:  
+  MQTT_BROKER=192.168.1.100  # Replace with your Pi's IP
+  ```
+- ✅ **Test MQTT connectivity**: `mosquitto_sub -h localhost -t em340/+`
+- ✅ **Check firewall settings** on MQTT broker host
 
 #### 2. **Serial Port Permission Denied**
 ```

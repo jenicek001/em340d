@@ -62,8 +62,8 @@ services:
       retries: 3
       start_period: 10s
     
-    # Network mode (default bridge is usually fine)
-    # network_mode: "host"  # Use if you need host networking
+    # Network mode - using host networking for MQTT broker connectivity
+    network_mode: "host"  # Allows container to access host's localhost
 
 # Named volumes for data persistence
 volumes:
