@@ -76,14 +76,17 @@ Example: `em340/235411W`
    
    # Serial Device Configuration  
    SERIAL_DEVICE=/dev/ttyUSB0
-# EM340 Device Identification
-# Carlo Gavazzi EM340 serial number - used as MQTT subtopic
-# Format: 6 digits + 1 letter (e.g., "235411W")
-# You can find this on the EM340 device label
-DEVICE_SERIAL_NUMBER=235411W
-
-# ModBus Settings
-MODBUS_ADDRESS=1              # EM340 ModBus slave address   # Application Configuration
+   
+   # EM340 Device Identification
+   # Carlo Gavazzi EM340 serial number - used as MQTT subtopic
+   # Format: 6 digits + 1 letter (e.g., "235411W")
+   # You can find this on the EM340 device label
+   DEVICE_SERIAL_NUMBER=235411W
+   
+   # ModBus Settings
+   MODBUS_ADDRESS=1              # EM340 ModBus slave address
+   
+   # Application Configuration
    LOG_LEVEL=INFO
    DELAY_MS=50
    ```
