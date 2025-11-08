@@ -26,6 +26,7 @@ Example: `em340/235411W`
 - **ModBus RTU Communication**: Read 30+ sensor values from EM340 meters
 - **MQTT Integration**: Publish data to any MQTT broker with automatic reconnection
 - **Remote Configuration**: Configure EM340 parameters via MQTT topics with validation
+- **USB Device Resilience** 🆕: Automatic reconnection when USB-Serial device disconnects
 - **Optimized Performance**: 87% reduction in ModBus calls through intelligent block reading
 - **Docker Support**: Easy deployment with Docker Compose
 - **Comprehensive Logging**: Timestamped logs with multiple levels and rotation
@@ -96,7 +97,7 @@ Example: `em340/235411W`
 4. **Set up serial port access**:
    ```bash
    # Automated setup: configures user IDs and serial access
-   ./setup-docker-user.sh
+   ./scripts/setup-docker-user.sh
    
    # This script will:
    # - Add your current user to dialout group
@@ -112,7 +113,7 @@ Example: `em340/235411W`
 5. **Deploy with Docker**:
    ```bash
    # Automated deployment with diagnostics
-   ./quick-rebuild.sh
+   ./scripts/quick-rebuild.sh
    
    # Or manual deployment
    docker compose up -d
@@ -121,10 +122,10 @@ Example: `em340/235411W`
 6. **Monitor the application**:
    ```bash
    # Real-time logs with colors and filtering
-   ./logs.sh -f
+   ./scripts/logs.sh -f
    
    # Check system status
-   ./troubleshoot.sh
+   ./scripts/troubleshoot.sh
    ```
 
 #### 🔄 **Auto-Start on Boot (Optional)**
@@ -133,7 +134,7 @@ To make EM340D start automatically when your Raspberry Pi reboots:
 
 ```bash
 # Run the auto-start installation script
-./install-autostart.sh
+./scripts/install-autostart.sh
 
 # Or manually enable Docker auto-start (simple method)
 sudo systemctl enable docker
@@ -143,11 +144,11 @@ docker compose up -d  # Container will restart automatically
 **Service Management:**
 ```bash
 # Control the service easily
-./em340d-service.sh start    # Start service
-./em340d-service.sh stop     # Stop service  
-./em340d-service.sh status   # Check status
-./em340d-service.sh logs     # View logs
-./em340d-service.sh test     # Test MQTT connectivity
+./scripts/em340d-service.sh start    # Start service
+./scripts/em340d-service.sh stop     # Stop service  
+./scripts/em340d-service.sh status   # Check status
+./scripts/em340d-service.sh logs     # View logs
+./scripts/em340d-service.sh test     # Test MQTT connectivity
 ```
 
 #### 📦 **Direct Python Installation**
@@ -337,16 +338,56 @@ For complete configuration documentation, see **[MQTT_CONFIGURATION.md](MQTT_CON
 ### Quick Diagnostics
 ```bash
 # Run comprehensive system check
-./troubleshoot.sh
+./scripts/troubleshoot.sh
 
 # Check real-time logs
-./logs.sh -f
+./scripts/logs.sh -f
 
 # Show only errors from last hour  
-./logs.sh -s "1h" -l ERROR
+./scripts/logs.sh -s "1h" -l ERROR
+
+# Test USB device reconnection
+./scripts/test-usb-reconnection.sh
 ```
 
 ### Common Issues
+
+#### 0. **USB Device Disconnection** 🆕
+```
+ERROR: Failed to read from ModBus device: [Errno 5] Input/output error
+```
+
+**Automatic Recovery**:
+The application now includes automatic USB device reconnection:
+- ✅ **Detects disconnections** automatically
+- ✅ **Retries with exponential backoff** (2s → 60s max)
+- ✅ **No manual intervention needed** - continues seamlessly
+- ✅ **No container restart required**
+
+**What you'll see in logs**:
+```
+WARNING: Serial device disconnected. Attempting reconnection (attempt 1)...
+INFO: Waiting 2.0s before reconnection attempt...
+INFO: Connection successful! Measurement mode: B
+INFO: Successfully reconnected to serial device. Resuming operations.
+```
+
+**If automatic recovery fails**, check:
+```bash
+# Verify device is physically connected
+ls -l /dev/ttyUSB* /dev/serial/by-id/
+
+# Check container has device access
+docker exec em340d ls -l /dev/ttyUSB*
+
+# Test device health
+docker exec em340d python tools/health_check.py
+
+# Review reconnection attempts in logs
+./scripts/logs.sh | grep -i reconnect
+```
+
+**For more details**, see: [`docs/USB_RECONNECTION.md`](docs/USB_RECONNECTION.md)
 
 #### 1. **MQTT Connection Failed**
 ```
@@ -375,7 +416,7 @@ PermissionError: [Errno 13] Permission denied: '/dev/ttyUSB0'
 **Solutions**:
 ```bash
 # Use automated setup (recommended)
-./setup-docker-user.sh
+./scripts/setup-docker-user.sh
 
 # Or manual setup:
 # 1. Check device exists and permissions
@@ -390,7 +431,7 @@ echo "GROUP_ID=$(id -g)" >> .env
 echo "DIALOUT_GID=$(getent group dialout | cut -d: -f3)" >> .env
 
 # 4. Log out and back in, then rebuild container
-./quick-rebuild.sh
+./scripts/quick-rebuild.sh
 ```
 
 #### 3. **ModBus Communication Timeout**
@@ -412,7 +453,7 @@ PermissionError: Permission denied: '/app/logs/em340d.log'
 **Solution**:
 ```bash
 # Rebuild container with proper permissions
-./quick-rebuild.sh
+./scripts/quick-rebuild.sh
 ```
 
 #### 5. **Docker Compose Version Issues**
@@ -502,10 +543,10 @@ No response from configuration service
 **Solutions**:
 ```bash
 # Check configuration service status
-./logs.sh -f | grep -i config
+./scripts/logs.sh -f | grep -i config
 
 # Test MQTT configuration connectivity
-./demo_mqtt_config.sh
+./scripts/demo_mqtt_config.sh
 
 # Monitor configuration activity
 mosquitto_sub -h localhost -t "em340/+/config/+/+" -v
@@ -514,24 +555,24 @@ mosquitto_sub -h localhost -t "em340/+/config/+/+" -v
 mosquitto_pub -h localhost -t "em340/235411W/config/available/get" -m ""
 
 # Verify parameter ranges and values
-# See MQTT_CONFIGURATION.md for valid values
+# See docs/MQTT_CONFIGURATION.md for valid values
 ```
 
 ### Log Analysis
 
 #### Monitor Application Startup
 ```bash
-./logs.sh -t 20 -l INFO  # Last 20 lines, INFO level and above
+./scripts/logs.sh -t 20 -l INFO  # Last 20 lines, INFO level and above
 ```
 
 #### Track MQTT Issues
 ```bash
-./logs.sh -f | grep -i mqtt  # Follow logs, filter for MQTT
+./scripts/logs.sh -f | grep -i mqtt  # Follow logs, filter for MQTT
 ```
 
 #### Monitor ModBus Performance
 ```bash
-./logs.sh -f | grep -i "organized.*blocks"  # Watch block optimization
+./scripts/logs.sh -f | grep -i "organized.*blocks"  # Watch block optimization
 ```
 
 ## 📈 **Performance Monitoring**
@@ -545,7 +586,7 @@ The application uses intelligent block reading:
 ### Monitor Performance
 ```bash
 # Check block organization
-./logs.sh | grep "Organized.*blocks"
+./scripts/logs.sh | grep "Organized.*blocks"
 
 # Example output:
 # Organized 30 sensors into 4 blocks:
@@ -564,12 +605,12 @@ docker compose up -d
 docker compose down
 
 # View logs
-./logs.sh -f                    # Enhanced viewer
-docker compose logs -f          # Standard Docker logs
+./scripts/logs.sh -f                # Enhanced viewer
+docker compose logs -f              # Standard Docker logs
 
 # Rebuild after changes
-./quick-rebuild.sh              # Automated rebuild
-docker compose build --no-cache # Manual rebuild
+./scripts/quick-rebuild.sh          # Automated rebuild
+docker compose build --no-cache     # Manual rebuild
 
 # Check container status
 docker compose ps
@@ -585,7 +626,7 @@ docker compose exec em340d ls -la /dev/ttyUSB0
 **Standard Update Process:**
 ```bash
 # Stop the service (if using systemd)
-./em340d-service.sh stop
+./scripts/em340d-service.sh stop
 
 # Or stop Docker manually
 docker compose down
@@ -594,10 +635,10 @@ docker compose down
 git pull origin main
 
 # Rebuild and restart with new version
-./quick-rebuild.sh
+./scripts/quick-rebuild.sh
 
 # Verify the update
-./em340d-service.sh status
+./scripts/em340d-service.sh status
 ```
 
 **Check for Updates:**
@@ -644,7 +685,7 @@ git log --grep="BREAKING" --oneline
 **3. Docker Image Updates:**
 ```bash
 # Force rebuild with no cache (for system dependencies)
-./quick-rebuild.sh --no-cache
+./scripts/quick-rebuild.sh --no-cache
 
 # Or manually:
 docker compose build --no-cache
@@ -660,11 +701,12 @@ docker compose up -d
 - [ ] Check application logs for issues: `./logs.sh -t 20`
 
 **After Updating:**
-- [ ] Verify service starts: `./em340d-service.sh status`
-- [ ] Test MQTT connectivity: `./test-mqtt-connectivity.sh`
-- [ ] Check for errors: `./logs.sh -t 10 -l ERROR`
+- [ ] Verify service starts: `./scripts/em340d-service.sh status`
+- [ ] Test MQTT connectivity: `./scripts/test-mqtt-connectivity.sh`
+- [ ] Check for errors: `./scripts/logs.sh -t 10 -l ERROR`
 - [ ] Verify data publishing: `mosquitto_sub -h localhost -t em340/+`
-- [ ] Test serial device access: `./test-serial-docker.sh`
+- [ ] Test serial device access: `./scripts/test-serial-docker.sh`
+- [ ] Test USB reconnection: `./scripts/test-usb-reconnection.sh` 🆕
 
 #### 🔧 **Maintenance Tasks**
 
@@ -700,7 +742,7 @@ docker volume ls | grep logs
 **Reset Everything (Nuclear Option):**
 ```bash
 # WARNING: This deletes all data and logs!
-./em340d-service.sh stop
+./scripts/em340d-service.sh stop
 docker compose down -v
 docker system prune -a -f
 rm -f .env em340.yaml  # Remove local config
@@ -741,10 +783,10 @@ mosquitto_sub -h YOUR_BROKER_IP -t "em340/+" -v
 ### Test MQTT Configuration 🆕
 ```bash
 # Run interactive configuration tool
-./test_mqtt_config.py
+./tests/test_mqtt_config.py
 
 # Run configuration demo
-./test_mqtt_config.py demo
+./tests/test_mqtt_config.py demo
 
 # Manual configuration test
 mosquitto_pub -h localhost -t "em340/235411W/config/measurement_mode/get" -m ""
@@ -766,7 +808,26 @@ sudo stty -F /dev/ttyUSB0 9600 raw -echo
 python em340config.py  # Configure EM340 meter settings
 ```
 
-## � **Reliability and Retry Mechanisms**
+## 🔄 **Reliability and Retry Mechanisms**
+
+### USB Device Resilience ✅ 🆕
+The application automatically handles USB-Serial device disconnections:
+
+- **Automatic Detection**: Monitors for IOError and SerialException
+- **Smart Reconnection**: Exponential backoff (2s → 60s max)
+- **Device Verification**: Checks file existence before reconnection
+- **Connection Testing**: Validates connection with test read
+- **Seamless Resume**: Continues operation without container restart
+
+```python
+# USB reconnection settings (built-in)
+base_delay: 2 seconds     # Initial retry delay
+max_delay: 60 seconds     # Maximum retry delay
+infinite_retry: yes       # Never gives up
+auto_verify: yes          # Tests connection before resuming
+```
+
+**For details**: See [`docs/USB_RECONNECTION.md`](docs/USB_RECONNECTION.md)
 
 ### MQTT Resilience ✅
 The application has robust MQTT reconnection capabilities:
@@ -783,30 +844,27 @@ max_delay: 30 seconds    # Maximum retry delay
 automatic: yes           # Background reconnection
 ```
 
-### ModBus Connection ⚠️
-Current ModBus handling has some limitations:
+### ModBus Connection ✅ (Improved 🆕)
+ModBus communication now includes automatic reconnection:
 
 **What Works:**
+- **Automatic Reconnection** 🆕: USB device disconnection detection and recovery
+- **Exponential Backoff** 🆕: Smart retry delays prevent resource exhaustion
 - **Timeout Protection**: 500ms timeout per operation prevents hanging
 - **Block-Level Recovery**: Failed blocks skipped, other sensors continue
 - **Rate Limiting**: 50ms delay between operations prevents device overload
 
-**Limitations:**
-- **No USB reconnection**: Device disconnect requires container restart
-- **No automatic retry**: Failed reads are skipped until next cycle
-- **Fixed timeout**: Not configurable per sensor type
+**Previous Limitations (Now Fixed):**
+- ~~No USB reconnection~~ ✅ **Now handles USB disconnect/reconnect automatically**
+- ~~Device disconnect requires container restart~~ ✅ **Now auto-reconnects seamlessly**
 
 ```yaml
 # Current ModBus settings
 config:
   t_delay_ms: 50           # Delay between ModBus operations
   # Serial timeout: 500ms  # Hard-coded in application
+  # USB reconnection: automatic with exponential backoff (2s-60s)
 ```
-
-**Improvement Suggestions:**
-1. Add configurable ModBus timeouts
-2. Implement USB device reconnection detection
-3. Add configurable retry counts for failed reads
 
 ### Container-Level Recovery ✅
 Multiple layers ensure service availability:
@@ -916,7 +974,166 @@ DEVICE_SERIAL_NUMBER=567892X
 MODBUS_ADDRESS=2
 ```
 
+## � **Repository Structure**
+
+```
+em340d/
+├── config/                    # Configuration files
+│   └── em340.yaml            # Runtime configuration (Docker)
+├── docs/                      # Documentation
+│   ├── DEPLOYMENT_ANALYSIS.md
+│   ├── DOCKER_COMPOSE_V2_FIX.md
+│   ├── DOCKER_IMPLEMENTATION.md
+│   ├── DOCKER_README.md
+│   ├── DOCKER_SERIAL_FIX.md
+│   ├── LOGGING_GUIDE.md
+│   ├── MODBUS_OPTIMIZATION.md
+│   ├── MQTT_CONFIGURATION.md
+│   ├── RASPBERRY_PI_FIXES.md
+│   ├── SERIAL_ACCESS_SOLUTIONS.md
+│   ├── SERIAL_NUMBER_UPDATE.md
+│   └── USB_RECONNECTION.md    # 🆕 USB device reconnection guide
+├── scripts/                   # Utility and deployment scripts
+│   ├── demo_mqtt_config.sh
+│   ├── deploy-with-user-mapping.sh
+│   ├── deploy-usb-reconnection-fix.sh  # 🆕
+│   ├── docker-deploy.sh
+│   ├── em340.sh
+│   ├── em340d-service.sh
+│   ├── install-autostart.sh
+│   ├── install.sh
+│   ├── logs.sh
+│   ├── quick-rebuild.sh
+│   ├── setup-config.sh
+│   ├── setup-docker-user.sh
+│   ├── setup-serial-access.sh
+│   ├── test-mqtt-connectivity.sh
+│   ├── test-serial-docker.sh
+│   ├── test-usb-reconnection.sh  # 🆕
+│   ├── troubleshoot.sh
+│   └── update.sh
+├── tests/                     # Test files
+│   ├── __init__.py
+│   ├── test_blocks.py
+│   ├── test_config_errors.py
+│   ├── test_em340.py
+│   ├── test_em340_init.py
+│   ├── test_em340config.py
+│   ├── test_em340monitor.py
+│   ├── test_logger.py
+│   ├── test_mqtt_config.py
+│   └── testtz.py
+├── tools/                     # Monitoring and health check tools
+│   ├── health_check.py        # 🆕 Device health verification
+│   └── watchdog.sh            # 🆕 External monitoring script
+├── .env                       # Environment configuration (not in repo)
+├── .env.template             # Environment variables template
+├── comments.txt
+├── config_loader.py          # YAML configuration with env vars
+├── docker-compose.yml        # Docker services definition
+├── Dockerfile                # Container image definition
+├── em340.py                  # Main application
+├── em340.yaml                # Configuration (Direct Python)
+├── em340.yaml.template       # Configuration template
+├── em340config.py            # EM340 configuration utility
+├── em340d.service            # Systemd service file
+├── em340monitor.py           # ModBus monitoring tool
+├── logger.py                 # Logging configuration
+├── LICENSE                   # MIT License
+├── README.md                 # This file
+└── requirements.txt          # Python dependencies
+```
+
 ## 📚 **File Reference**
+
+### Core Application Files
+- **`em340.py`** - Main application with automatic USB reconnection 🆕
+- **`config_loader.py`** - Configuration loader with environment variable support
+- **`logger.py`** - Centralized logging configuration
+- **`em340config.py`** - EM340 configuration utility
+- **`em340monitor.py`** - ModBus traffic monitoring tool
+- **`em340_config_manager.py`** - MQTT-based remote configuration
+
+### Configuration Files
+- **`.env`** - Environment variables (Docker, not in repo)
+- **`.env.template`** - Environment variables template
+- **`config/em340.yaml`** - Configuration file (Docker)
+- **`em340.yaml`** - Configuration file (Direct installation)
+- **`em340.yaml.template`** - Configuration template
+
+### Docker Files
+- **`docker-compose.yml`** - Docker services with USB resilience 🆕
+- **`Dockerfile`** - Container image definition
+- **`em340d.service`** - Systemd service file
+- **`requirements.txt`** - Python dependencies
+
+### Scripts Directory (`scripts/`)
+**Deployment & Setup:**
+- **`quick-rebuild.sh`** - Fast Docker rebuild and deployment
+- **`docker-deploy.sh`** - Production deployment script
+- **`deploy-usb-reconnection-fix.sh`** 🆕 - Deploy USB reconnection fix
+- **`install-autostart.sh`** - Configure auto-start on boot
+- **`setup-docker-user.sh`** - Configure user permissions
+- **`setup-serial-access.sh`** - Serial port setup
+
+**Monitoring & Testing:**
+- **`logs.sh`** - Enhanced log viewer with filtering
+- **`troubleshoot.sh`** - System diagnostic tool
+- **`test-mqtt-connectivity.sh`** - Test MQTT connection
+- **`test-serial-docker.sh`** - Test serial access
+- **`test-usb-reconnection.sh`** 🆕 - Test USB reconnection
+- **`em340d-service.sh`** - Service management wrapper
+
+**Configuration:**
+- **`demo_mqtt_config.sh`** - MQTT configuration demo
+- **`setup-config.sh`** - Initial configuration setup
+
+### Tools Directory (`tools/`)
+- **`health_check.py`** 🆕 - Device health verification script
+- **`watchdog.sh`** 🆕 - External monitoring with auto-restart
+
+### Documentation Directory (`docs/`)
+**Setup & Deployment:**
+- **`DOCKER_IMPLEMENTATION.md`** - Docker setup guide
+- **`DOCKER_README.md`** - Docker usage documentation
+- **`DEPLOYMENT_ANALYSIS.md`** - Deployment strategies
+- **`RASPBERRY_PI_FIXES.md`** - Raspberry Pi specific fixes
+
+**Configuration:**
+- **`MQTT_CONFIGURATION.md`** - Remote configuration guide
+- **`SERIAL_ACCESS_SOLUTIONS.md`** - Serial port solutions
+- **`USB_RECONNECTION.md`** 🆕 - USB device reconnection guide
+
+**Troubleshooting:**
+- **`DOCKER_SERIAL_FIX.md`** - Docker serial issues
+- **`DOCKER_COMPOSE_V2_FIX.md`** - Docker Compose v2 fixes
+- **`LOGGING_GUIDE.md`** - Comprehensive logging guide
+
+**Optimization:**
+- **`MODBUS_OPTIMIZATION.md`** - ModBus performance tuning
+- **`SERIAL_NUMBER_UPDATE.md`** - Device identification
+
+### Tests Directory (`tests/`)
+- **`test_em340.py`** - Main application tests
+- **`test_em340config.py`** - Configuration tests
+- **`test_mqtt_config.py`** - MQTT configuration tests
+- **`test_blocks.py`** - ModBus block reading tests
+- **`test_logger.py`** - Logging tests
+
+## 📚 **Documentation**
+
+### Essential Reading
+- **[USB_RECONNECTION.md](docs/USB_RECONNECTION.md)** 🆕 - USB device reconnection guide
+- **[MQTT_CONFIGURATION.md](docs/MQTT_CONFIGURATION.md)** - Remote configuration via MQTT
+- **[LOGGING_GUIDE.md](docs/LOGGING_GUIDE.md)** - Comprehensive logging documentation
+- **[DOCKER_SERIAL_FIX.md](docs/DOCKER_SERIAL_FIX.md)** - Serial port access solutions
+
+### Advanced Topics
+- **[MODBUS_OPTIMIZATION.md](docs/MODBUS_OPTIMIZATION.md)** - Performance tuning
+- **[DEPLOYMENT_ANALYSIS.md](docs/DEPLOYMENT_ANALYSIS.md)** - Deployment strategies
+- **[RASPBERRY_PI_FIXES.md](docs/RASPBERRY_PI_FIXES.md)** - Platform-specific solutions
+
+## �📚 **File Reference (Legacy)**
 
 ### Key Files
 - **`.env`** - Environment variables (Docker)
@@ -950,13 +1167,14 @@ MODBUS_ADDRESS=2
 ### Common Solutions Summary
 | Issue | Quick Fix |
 |-------|-----------|
+| USB device disconnect 🆕 | Automatic recovery - no action needed! |
 | MQTT connection failed | Check `MQTT_BROKER` in `.env` |
-| Serial permission denied | Run `sudo ./setup-serial-access.sh` |
-| Container won't start | Run `./quick-rebuild.sh` |
+| Serial permission denied | Run `sudo ./scripts/setup-serial-access.sh` |
+| Container won't start | Run `./scripts/quick-rebuild.sh` |
 | No data published | Check ModBus address and wiring |
-| Log permission errors | Rebuild container: `./quick-rebuild.sh` |
-| Configuration not working | Run `./demo_mqtt_config.sh` |
-| Config service not responding | Check logs: `./logs.sh -f | grep -i config` |
+| Log permission errors | Rebuild container: `./scripts/quick-rebuild.sh` |
+| Configuration not working | Run `./scripts/demo_mqtt_config.sh` |
+| Config service not responding | Check logs: `./scripts/logs.sh -f | grep -i config` |
 
 ---
 

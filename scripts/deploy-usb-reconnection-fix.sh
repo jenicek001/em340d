@@ -67,5 +67,5 @@ echo "  2. Test reconnection: Unplug/replug USB device"
 echo "  3. Check health:    docker exec em340d python health_check.py"
 echo "  4. Optional: Setup watchdog with: sudo systemctl enable em340d-watchdog"
 echo
-echo "For more information, see: USB_RECONNECTION.md"
+echo "For more information, see: docs/USB_RECONNECTION.md"
 echo
