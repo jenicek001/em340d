@@ -136,6 +136,9 @@ em340d.log
 # Docker volumes and temporary files
 config/em340.yaml
 
+# Backups created by update script
+backups/
+
 # Spyder project settings
 .spyderproject
 .spyproject
