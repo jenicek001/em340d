@@ -4,6 +4,7 @@ import serial
 import time
 import yaml # pip install PyYAML
 import sys
+import os
 import json
 import paho.mqtt.client as mqtt
 from datetime import date, datetime, timedelta
@@ -28,6 +29,11 @@ class EM340:
         
         log.info(f'ModBus configuration: device={self.device}, address={self.modbus_address}, delay={self.t_delay_seconds}s')
 
+        # Initialize serial connection with retry support
+        self._initialize_serial_connection()
+
+    def _initialize_serial_connection(self):
+        """Initialize or reinitialize the serial connection to the ModBus device."""
         self.em340 = minimalmodbus.Instrument(self.device, self.modbus_address) # port name, slave address (in decimal)
         self.em340.serial.port # this is the serial port name
         self.em340.serial.baudrate = 9600 # Baud
@@ -59,6 +65,10 @@ class EM340:
             log.error(f'Initial MQTT connection failed: {e}')
 
         # Initialize configuration manager
+        self._initialize_config_manager()
+
+    def _initialize_config_manager(self):
+        """Initialize the configuration manager for MQTT-based device configuration."""
         config_mqtt_config = {
             'broker': self.em340_config['mqtt']['broker'],
             'port': self.em340_config['mqtt']['port'],
@@ -92,6 +102,72 @@ class EM340:
             log.warning('Unexpected MQTT disconnection. Will attempt to reconnect.')
         else:
             log.info('MQTT client disconnected.')
+
+    def _reconnect_serial_device(self, max_retries=None, base_delay=2.0, max_delay=60.0):
+        """
+        Attempt to reconnect to the serial device with exponential backoff.
+        
+        Args:
+            max_retries: Maximum number of retry attempts (None for infinite)
+            base_delay: Initial delay between retries in seconds
+            max_delay: Maximum delay between retries in seconds
+            
+        Returns:
+            True if reconnection successful, False otherwise
+        """
+        retry_count = 0
+        delay = base_delay
+        
+        while max_retries is None or retry_count < max_retries:
+            retry_count += 1
+            log.warning(f'Serial device disconnected. Attempting reconnection (attempt {retry_count})...')
+            
+            try:
+                # Close the old connection if it exists
+                if hasattr(self.em340, 'serial') and hasattr(self.em340.serial, 'is_open'):
+                    try:
+                        if self.em340.serial.is_open:
+                            self.em340.serial.close()
+                            log.info('Closed old serial connection')
+                    except:
+                        pass  # Ignore errors closing old connection
+                
+                # Wait before attempting reconnection
+                log.info(f'Waiting {delay:.1f}s before reconnection attempt...')
+                time.sleep(delay)
+                
+                # Check if device file exists
+                import os
+                if not os.path.exists(self.device):
+                    log.error(f'Device file {self.device} does not exist')
+                    # Increase delay for next attempt (exponential backoff)
+                    delay = min(delay * 1.5, max_delay)
+                    continue
+                
+                # Reinitialize the serial connection
+                self._initialize_serial_connection()
+                
+                # Test the connection by reading a register
+                log.info('Testing connection by reading device measurement mode...')
+                measurement_mode = self.em340.read_register(0x1103)
+                measurement_mode_type = chr(measurement_mode + 65)
+                log.info(f'Connection successful! Measurement mode: {measurement_mode_type}')
+                
+                # Reset delay for future disconnections
+                return True
+                
+            except serial.SerialException as e:
+                log.error(f'Serial connection failed: {e}')
+            except IOError as e:
+                log.error(f'ModBus communication failed: {e}')
+            except Exception as e:
+                log.error(f'Unexpected error during reconnection: {e}')
+            
+            # Increase delay for next attempt (exponential backoff)
+            delay = min(delay * 1.5, max_delay)
+        
+        log.error(f'Failed to reconnect after {retry_count} attempts')
+        return False
 
         # TODO send to MQTT to a different subtopic
         measurement_mode = self.em340.read_register(0x1103)
@@ -238,8 +314,26 @@ class EM340:
                         
                 except IOError as err:
                     log.error(f'Failed to read from ModBus device at {self.em340.serial.port}: {err}')
-                    # For IOError, continue to next block - might be temporary communication issue
-                    continue
+                    # Attempt to reconnect to the device
+                    log.warning('Attempting to reconnect to serial device...')
+                    if self._reconnect_serial_device():
+                        log.info('Successfully reconnected to serial device. Resuming operations.')
+                        # Continue to next block after successful reconnection
+                        continue
+                    else:
+                        log.error('Failed to reconnect to serial device. Will retry on next iteration.')
+                        # Break out of block loop and wait before trying again
+                        break
+                except serial.SerialException as err:
+                    log.error(f'Serial communication error: {err}')
+                    # Attempt to reconnect to the device
+                    log.warning('Serial exception detected. Attempting to reconnect...')
+                    if self._reconnect_serial_device():
+                        log.info('Successfully reconnected after serial exception. Resuming operations.')
+                        continue
+                    else:
+                        log.error('Failed to reconnect after serial exception. Will retry on next iteration.')
+                        break
                 except ValueError as err:
                     log.error(f'Error reading block starting at 0x{start_addr:04X}: {err}')
                     continue
