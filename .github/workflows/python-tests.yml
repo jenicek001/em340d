@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.9", "3.10", "3.11"]
+        python-version: ["3.10", "3.11", "3.12"]
 
     steps:
     - uses: actions/checkout@v4
@@ -39,7 +39,7 @@ jobs:
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
     - name: Set up test config
       run: |
-        cp config/em340.yaml em340.yaml
+        cp em340.yaml.template em340.yaml
         sed -i 's/log_to_file: true/log_to_file: false/' em340.yaml
     - name: Test with pytest
       run: |
