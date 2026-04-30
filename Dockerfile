@@ -16,7 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY pyproject.toml ./
 RUN pip install --no-cache-dir poetry \
     && poetry config virtualenvs.create false \
-    && poetry install --only main --no-interaction --no-ansi \
+    && poetry install --only main --no-root --no-interaction --no-ansi \
     && pip uninstall -y poetry
 
 # Create logs directory
