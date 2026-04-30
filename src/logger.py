@@ -50,6 +50,6 @@ if log_to_file:
         print(f'Warning: could not open log file {log_file}: {e}', file=sys.stderr)
 
 if log_to_console:
-    stream_handler = logging.StreamHandler()
+    stream_handler = logging.StreamHandler(stream=sys.stdout)
     stream_handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s'))
     log.addHandler(stream_handler)
