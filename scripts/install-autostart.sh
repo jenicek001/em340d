@@ -42,7 +42,7 @@ print_info "Current user: $CURRENT_USER"
 print_info "Installation directory: $CURRENT_DIR"
 
 # Check if we're in the right directory
-if [ ! -f "docker-compose.yml" ] || [ ! -f "em340.py" ]; then
+if [ ! -f "docker-compose.yml" ] || [ ! -f "src/em340.py" ]; then
     print_error "This doesn't appear to be the EM340D directory"
     print_info "Please run this script from the EM340D project directory"
     exit 1

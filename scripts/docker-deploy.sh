@@ -67,18 +67,10 @@ setup_directories() {
 
 # Setup configuration files
 setup_config() {
-    if [ ! -f "config/em340.yaml" ]; then
-        print_info "Creating configuration file from template..."
-        cp em340.yaml.template config/em340.yaml
-        print_warning "Please edit config/em340.yaml with your specific settings"
-    else
-        print_success "Configuration file already exists"
-    fi
-
     if [ ! -f ".env" ]; then
         print_info "Creating environment file from template..."
         cp .env.template .env
-        print_warning "Please edit .env file with your MQTT broker settings"
+        print_warning "Please edit .env file with your settings"
     else
         print_success "Environment file already exists"
     fi
@@ -126,7 +118,7 @@ deploy() {
         print_success "Docker image dependencies verified"
     else
         print_error "Docker image dependencies test failed"
-        print_info "Check build logs and requirements.txt"
+        print_info "Check build logs and pyproject.toml"
         exit 1
     fi
 
@@ -166,8 +158,7 @@ show_usage() {
     echo "  --help         Show this help message"
     echo ""
     echo "Files created:"
-    echo "  config/em340.yaml   - Main configuration file"
-    echo "  .env               - Environment variables (MQTT settings)"
+    echo "  .env               - Environment variables (all runtime settings)"
     echo "  logs/              - Application logs directory"
     echo ""
     echo "Commands after deployment:"

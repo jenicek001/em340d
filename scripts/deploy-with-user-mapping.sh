@@ -123,16 +123,16 @@ if [ ! -f "Dockerfile" ]; then
     MISSING_FILES+=("Dockerfile")
 fi
 
-if [ ! -f "requirements.txt" ]; then
-    MISSING_FILES+=("requirements.txt")
+if [ ! -f "pyproject.toml" ]; then
+    MISSING_FILES+=("pyproject.toml")
 fi
 
-if [ ! -f "em340.py" ]; then
-    MISSING_FILES+=("em340.py")
+if [ ! -f "src/em340.py" ]; then
+    MISSING_FILES+=("src/em340.py")
 fi
 
-if [ ! -f "config/em340.yaml" ]; then
-    MISSING_FILES+=("config/em340.yaml")
+if [ ! -f "config/sensors.yaml" ]; then
+    MISSING_FILES+=("config/sensors.yaml")
 fi
 
 if [ ! -f ".env" ]; then

@@ -3,5 +3,3 @@ paho-mqtt==2.1.0
 pyserial==3.5
 python-dateutil==2.9.0.post0
 PyYAML==6.0.2
-six==1.17.0
-pytest==9.0.3

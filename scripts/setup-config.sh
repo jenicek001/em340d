@@ -4,7 +4,8 @@
 # Creates necessary configuration files for first-time setup
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+cd "$PROJECT_DIR"
 
 # Colors for output
 RED='\033[0;31m'
@@ -38,19 +39,10 @@ print_header() {
 
 print_header
 
-# Check if templates exist
-if [ ! -f ".env.template" ] || [ ! -f "em340.yaml.template" ]; then
-    print_error "Template files missing! Please ensure .env.template and em340.yaml.template exist."
+# Check if .env template exists
+if [ ! -f ".env.template" ]; then
+    print_error "Template file .env.template missing! Please ensure the repository is complete."
     exit 1
-fi
-
-# Create config directory if it doesn't exist
-if [ ! -d "config" ]; then
-    print_info "Creating config directory..."
-    mkdir -p config
-    print_success "Config directory created"
-else
-    print_info "Config directory already exists"
 fi
 
 # Setup .env file
@@ -58,28 +50,9 @@ if [ ! -f ".env" ]; then
     print_info "Creating .env file from template..."
     cp .env.template .env
     print_success ".env file created"
-    print_warning "Please edit .env file with your MQTT broker settings"
+    print_warning "Please edit .env file with your settings"
 else
     print_warning ".env file already exists - skipping"
-fi
-
-# Setup em340.yaml file (for direct Python installation)
-if [ ! -f "em340.yaml" ]; then
-    print_info "Creating em340.yaml from template..."
-    cp em340.yaml.template em340.yaml
-    print_success "em340.yaml created"
-    print_warning "Please edit em340.yaml with your specific settings"
-else
-    print_warning "em340.yaml already exists - skipping"
-fi
-
-# Setup config/em340.yaml file
-if [ ! -f "config/em340.yaml" ]; then
-    print_info "Creating config/em340.yaml from template..."
-    cp em340.yaml.template config/em340.yaml
-    print_success "config/em340.yaml created"
-else
-    print_warning "config/em340.yaml already exists - skipping"
 fi
 
 # Display current configuration status
@@ -90,8 +63,7 @@ print_info "===================="
 # Check .env file
 if [ -f ".env" ]; then
     print_success ".env file: EXISTS"
-    
-    # Check if MQTT_BROKER is configured
+
     if grep -q "MQTT_BROKER=localhost" .env || grep -q "MQTT_BROKER=$" .env; then
         print_warning "  ⚠️  MQTT_BROKER still set to localhost - needs configuration"
     else
@@ -102,25 +74,11 @@ else
     print_error ".env file: MISSING"
 fi
 
-# Check em340.yaml file (for direct Python installation)
-if [ -f "em340.yaml" ]; then
-    print_success "em340.yaml: EXISTS"
-    
-    # Check if serial number is configured
-    if grep -q "serial_number.*235411W" em340.yaml; then
-        print_success "  ✅ Serial number configured"
-    else
-        print_warning "  ⚠️  Serial number may need customization"
-    fi
+# Check sensors definition file (static, included in repo)
+if [ -f "config/sensors.yaml" ]; then
+    print_success "config/sensors.yaml: EXISTS (static sensor definitions)"
 else
-    print_error "em340.yaml: MISSING"
-fi
-
-# Check config file
-if [ -f "config/em340.yaml" ]; then
-    print_success "config/em340.yaml: EXISTS (Docker template)"
-else
-    print_error "config/em340.yaml: MISSING"
+    print_error "config/sensors.yaml: MISSING (should be included in the repository)"
 fi
 
 # Check USB devices
@@ -136,7 +94,7 @@ fi
 print_info ""
 print_info "Next Steps:"
 print_info "==========="
-print_info "1. Edit .env file with your MQTT broker settings:"
+print_info "1. Edit .env file with your settings:"
 print_info "   ${YELLOW}nano .env${NC}"
 print_info ""
 print_info "   Required settings:"
@@ -148,14 +106,14 @@ print_info "2. Check your USB-RS485 device:"
 print_info "   ${YELLOW}ls -la /dev/ttyUSB*${NC}"
 print_info ""
 print_info "3. Set up serial port access:"
-print_info "   ${YELLOW}sudo ./setup-serial-access.sh${NC}"
+print_info "   ${YELLOW}sudo ./scripts/setup-serial-access.sh${NC}"
 print_info ""
 print_info "4. Deploy with Docker:"
-print_info "   ${YELLOW}./quick-rebuild.sh${NC}"
+print_info "   ${YELLOW}./scripts/quick-rebuild.sh${NC}"
 print_info ""
 print_info "5. Monitor logs:"
-print_info "   ${YELLOW}./logs.sh -f${NC}"
+print_info "   ${YELLOW}./scripts/logs.sh -f${NC}"
 
 print_info ""
 print_success "Configuration setup complete!"
-print_info "Edit the configuration files and follow the next steps above."
+print_info "Edit the .env file and follow the next steps above."

@@ -113,7 +113,8 @@ class EM340ConfigManager:
     
     def __init__(self, mqtt_config: Dict[str, Any], modbus_device: str, modbus_address: int):
         """Initialize the configuration manager"""
-        self.mqtt_config = mqtt_config
+        self.mqtt_broker = mqtt_config.get('broker', 'localhost')
+        self.mqtt_port = int(mqtt_config.get('port', 1883))
         self.modbus_device = modbus_device
         self.modbus_address = modbus_address
         
@@ -145,7 +146,7 @@ class EM340ConfigManager:
         """Start the MQTT configuration service"""
         try:
             self.config_mqtt_client.loop_start()
-            self.config_mqtt_client.connect(self.mqtt_config['broker'], self.mqtt_config['port'])
+            self.config_mqtt_client.connect(self.mqtt_broker, self.mqtt_port)
             log.info("EM340 configuration service started")
             return True
         except Exception as e:

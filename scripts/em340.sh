@@ -1,4 +1,3 @@
 #!/bin/bash
 cd /opt/em340d
-source venv/bin/activate
-python3 em340.py
+poetry run python src/em340.py
