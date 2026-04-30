@@ -16,14 +16,14 @@ def load_sensors(sensors_file: str) -> list:
         List of sensor definition dicts.
 
     Raises:
-        Exception: If the file cannot be read or parsed.
+        ValueError: If the file cannot be read, parsed, or validated.
     """
     try:
         with open(sensors_file, 'r') as f:
-            config = yaml.load(f, Loader=yaml.FullLoader)
+            config = yaml.safe_load(f) or {}
         sensors = config.get('sensors', [])
         if not isinstance(sensors, list):
             raise ValueError("'sensors' key must be a list")
         return sensors
     except Exception as e:
-        raise Exception(f'Error loading sensors file {sensors_file}: {e}')
+        raise ValueError(f'Error loading sensors file {sensors_file}: {e}') from e
