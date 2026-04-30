@@ -10,29 +10,17 @@ services:
     container_name: em340d
     restart: unless-stopped
     
-    # Container runs as dynamically created user matching host user permissions
-    # Build args ensure container user has same UID/GID as host user
-    
     # USB device resilience: Use privileged mode to allow container to access
     # devices dynamically even after USB reconnection. The /dev volume mount
     # ensures the container sees new device files when USB devices reconnect.
     privileged: true
     
     # Mount entire /dev directory to handle dynamic USB device reconnections
-    # This allows the container to see device files even after USB disconnect/reconnect
     volumes:
-      - ./config/em340.yaml:/app/em340.yaml:ro
       - em340d_logs:/app/logs
       - /dev:/dev  # Full /dev access for USB device resilience
     
-    # Legacy device mapping - kept for reference but not needed with privileged mode
-    # devices:
-    #   - /dev/ttyUSB0:/dev/ttyUSB0
-    #   - /dev/ttyACM0:/dev/ttyACM0
-    
-    # Configuration and data persistence
-    
-    # Environment variables for configuration
+    # Environment variables for runtime configuration (from .env)
     environment:
       - MQTT_BROKER=${MQTT_BROKER:-localhost}
       - MQTT_PORT=${MQTT_PORT:-1883}
@@ -42,9 +30,15 @@ services:
       - SERIAL_DEVICE=${SERIAL_DEVICE:-/dev/ttyUSB0}
       - MODBUS_ADDRESS=${MODBUS_ADDRESS:-1}
       - DEVICE_SERIAL_NUMBER=${DEVICE_SERIAL_NUMBER:-EM340_UNKNOWN}
-      - DEVICE_NAME=${DEVICE_NAME:-EM340}  # Legacy support
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_TO_CONSOLE=${LOG_TO_CONSOLE:-true}
+      - LOG_TO_FILE=${LOG_TO_FILE:-true}
+      - LOG_FILE=${LOG_FILE:-/app/logs/em340d.log}
+      - LOG_ROTATE=${LOG_ROTATE:-true}
+      - LOG_ROTATE_SIZE=${LOG_ROTATE_SIZE:-1048576}
+      - LOG_ROTATE_COUNT=${LOG_ROTATE_COUNT:-5}
       - DELAY_MS=${DELAY_MS:-50}
+      - POLLING_INTERVAL_S=${POLLING_INTERVAL_S:-10}
     
     # Logging configuration with timestamps
     logging:
@@ -52,26 +46,21 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-        # Enable timestamps in Docker logs
         labels: "service=em340d"
     
     # Health check
     healthcheck:
-      test: ["CMD-SHELL", "python -c 'import os; exit(0 if os.path.exists(\"/app/em340.yaml\") else 1)'"]
+      test: ["CMD-SHELL", "python -c 'import minimalmodbus; print(\"OK\")'"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 10s
     
     # Network mode - using host networking for MQTT broker connectivity
-    network_mode: "host"  # Allows container to access host's localhost
+    network_mode: "host"
 
 # Named volumes for data persistence
 volumes:
   em340d_logs:
     driver: local
 
-# Optional: Custom networks
-# networks:
-#   em340d_net:
-#     driver: bridge

@@ -1,191 +1,83 @@
 #!/usr/bin/env python
 """
-Test script to check configuration error handling
+Tests for config_loader.py - sensor YAML loading and error handling.
 """
 import os
-import sys
 import tempfile
-import yaml
+import pytest
+from config_loader import load_sensors
 
-# Import just the config loader without logger dependency
-sys.path.insert(0, '.')
-from config_loader import load_yaml_with_env
 
-def test_missing_sections():
-    """Test behavior when entire sections are missing"""
-    
-    print("=== Testing Missing Configuration Sections ===")
-    
-    # Test 1: Missing 'config' section
-    test_yaml = """
-mqtt:
-  broker: localhost
-  port: 1883
-  topic: em340
-sensor:
-  - id: test
-    name: Test
-"""
-    
+def _write_tmp_yaml(content: str) -> str:
     with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
-        f.write(test_yaml)
-        f.flush()
-        
-        try:
-            config = load_yaml_with_env(f.name)
-            device = config['config']['device']  # This should fail
-            print("❌ ERROR: Should have failed on missing 'config' section")
-        except KeyError as e:
-            print(f"✅ GOOD: KeyError caught for missing 'config' section: {e}")
-        except Exception as e:
-            print(f"⚠️ UNEXPECTED: Got {type(e).__name__}: {e}")
-        finally:
-            os.unlink(f.name)
+        f.write(content)
+        return f.name
 
-def test_missing_config_keys():
-    """Test behavior when config section keys are missing"""
-    
-    print("\n=== Testing Missing Config Keys ===")
-    
-    # Test missing device key
-    test_yaml = """
-config:
-  modbus_address: 1
-  t_delay_ms: 50
-mqtt:
-  broker: localhost
-  port: 1883
-  topic: em340
-sensor: []
+
+def test_load_valid_sensors():
+    """load_sensors returns a list of dicts for a valid YAML file."""
+    yaml_content = """
+sensors:
+  - id: voltage_l1
+    name: "Voltage L1-N"
+    address: 0x0000
+    register_count: 2
+    value_type: INT32
+    multiply: 0.1
 """
-    
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
-        f.write(test_yaml)
-        f.flush()
-        
-        try:
-            config = load_yaml_with_env(f.name)
-            device = config['config']['device']  # Missing key
-            print("❌ ERROR: Should have failed on missing 'device' key")
-        except KeyError as e:
-            print(f"✅ GOOD: KeyError caught for missing 'device' key: {e}")
-        except Exception as e:
-            print(f"⚠️ UNEXPECTED: Got {type(e).__name__}: {e}")
-        finally:
-            os.unlink(f.name)
+    path = _write_tmp_yaml(yaml_content)
+    try:
+        sensors = load_sensors(path)
+        assert isinstance(sensors, list)
+        assert len(sensors) == 1
+        assert sensors[0]['id'] == 'voltage_l1'
+    finally:
+        os.unlink(path)
 
-def test_missing_mqtt_keys():
-    """Test behavior when MQTT section keys are missing"""
-    
-    print("\n=== Testing Missing MQTT Keys ===")
-    
-    # Test missing broker key
-    test_yaml = """
-config:
-  device: /dev/ttyUSB0
-  modbus_address: 1
-  t_delay_ms: 50
-mqtt:
-  port: 1883
-  topic: em340
-sensor: []
-"""
-    
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
-        f.write(test_yaml)
-        f.flush()
-        
-        try:
-            config = load_yaml_with_env(f.name)
-            broker = config['mqtt']['broker']  # Missing key
-            print("❌ ERROR: Should have failed on missing 'broker' key")
-        except KeyError as e:
-            print(f"✅ GOOD: KeyError caught for missing 'broker' key: {e}")
-        except Exception as e:
-            print(f"⚠️ UNEXPECTED: Got {type(e).__name__}: {e}")
-        finally:
-            os.unlink(f.name)
 
-def test_missing_env_variable():
-    """Test behavior when environment variable is missing"""
-    
-    print("\n=== Testing Missing Environment Variables ===")
-    
-    # Test required env var (no default)
-    test_yaml = """
-config:
-  device: ${MISSING_DEVICE}
-  modbus_address: 1
-mqtt:
-  broker: localhost
-sensor: []
-"""
-    
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
-        f.write(test_yaml)
-        f.flush()
-        
-        try:
-            # Make sure the env var doesn't exist
-            if 'MISSING_DEVICE' in os.environ:
-                del os.environ['MISSING_DEVICE']
-                
-            config = load_yaml_with_env(f.name)
-            print("❌ ERROR: Should have failed on missing required env var")
-        except ValueError as e:
-            print(f"✅ GOOD: ValueError caught for missing required env var: {e}")
-        except Exception as e:
-            print(f"⚠️ UNEXPECTED: Got {type(e).__name__}: {e}")
-        finally:
-            os.unlink(f.name)
+def test_load_sensors_empty_list():
+    """load_sensors returns an empty list when sensors key is empty."""
+    yaml_content = "sensors: []\n"
+    path = _write_tmp_yaml(yaml_content)
+    try:
+        sensors = load_sensors(path)
+        assert sensors == []
+    finally:
+        os.unlink(path)
 
-def test_sensor_missing_keys():
-    """Test behavior when sensor configuration has missing keys"""
-    
-    print("\n=== Testing Missing Sensor Keys ===")
-    
-    # Test sensor with missing required fields
-    test_yaml = """
-config:
-  device: /dev/ttyUSB0
-  modbus_address: 1
-  t_delay_ms: 50
-mqtt:
-  broker: localhost
-  port: 1883
-  topic: em340
-sensor:
-  - id: test_sensor
-    name: "Test Sensor"
-    # Missing: address, value_type, multiply
-"""
-    
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
-        f.write(test_yaml)
-        f.flush()
-        
-        try:
-            config = load_yaml_with_env(f.name)
-            # This would typically fail during sensor processing
-            sensor = config['sensor'][0]
-            address = sensor['address']  # Missing key
-            print("❌ ERROR: Should have failed on missing 'address' key")
-        except KeyError as e:
-            print(f"✅ GOOD: KeyError caught for missing sensor 'address' key: {e}")
-        except Exception as e:
-            print(f"⚠️ UNEXPECTED: Got {type(e).__name__}: {e}")
-        finally:
-            os.unlink(f.name)
 
-if __name__ == '__main__':
-    print("Testing EM340D Configuration Error Handling")
-    print("=" * 50)
-    
-    test_missing_sections()
-    test_missing_config_keys()
-    test_missing_mqtt_keys()
-    test_missing_env_variable()
-    test_sensor_missing_keys()
-    
-    print("\n" + "=" * 50)
-    print("Configuration error testing completed")
+def test_load_sensors_missing_file():
+    """load_sensors raises Exception for a non-existent file."""
+    with pytest.raises(Exception, match='Error loading sensors file'):
+        load_sensors('/nonexistent/path/sensors.yaml')
+
+
+def test_load_sensors_invalid_yaml():
+    """load_sensors raises Exception for malformed YAML."""
+    path = _write_tmp_yaml("sensors: [\n  - unclosed bracket\n")
+    try:
+        with pytest.raises(Exception, match='Error loading sensors file'):
+            load_sensors(path)
+    finally:
+        os.unlink(path)
+
+
+def test_load_sensors_wrong_type():
+    """load_sensors raises ValueError when 'sensors' is not a list."""
+    path = _write_tmp_yaml("sensors: not_a_list\n")
+    try:
+        with pytest.raises(Exception, match='Error loading sensors file'):
+            load_sensors(path)
+    finally:
+        os.unlink(path)
+
+
+def test_load_sensors_missing_key():
+    """load_sensors returns empty list when 'sensors' key is absent (defaults via .get)."""
+    path = _write_tmp_yaml("other_key: value\n")
+    try:
+        sensors = load_sensors(path)
+        assert sensors == []
+    finally:
+        os.unlink(path)
+

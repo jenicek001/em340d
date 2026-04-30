@@ -40,9 +40,18 @@ wheels/
 *.egg
 
 # Testing
+tests/
 .pytest_cache/
 .coverage
 htmlcov/
 
 # Documentation
+docs/
 docs/_build/
+
+# Tools (not needed in container)
+tools/
+
+# Git
+.git/
+.github/

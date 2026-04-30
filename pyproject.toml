@@ -1,0 +1,29 @@
+[tool.poetry]
+name = "em340d"
+version = "0.2.0"
+description = "Carlo Gavazzi EM340 ModBus to MQTT Gateway"
+authors = []
+readme = "README.md"
+license = "MIT"
+packages = [{ include = "*.py", from = "src" }]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+minimalmodbus = "2.1.1"
+paho-mqtt = "2.1.0"
+pyserial = "3.5"
+python-dateutil = "2.9.0.post0"
+PyYAML = "6.0.2"
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=9.0"
+
+[tool.poetry.scripts]
+em340d = "em340:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

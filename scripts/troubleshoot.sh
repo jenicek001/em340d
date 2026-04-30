@@ -122,13 +122,10 @@ fi
 
 # Check configuration files
 print_info "Checking configuration files..."
-if [ -f "config/em340.yaml" ]; then
-    print_success "Configuration file exists: config/em340.yaml"
+if [ -f "config/sensors.yaml" ]; then
+    print_success "Sensor definitions file exists: config/sensors.yaml"
 else
-    print_warning "Configuration file missing: config/em340.yaml"
-    if [ -f "em340.yaml.template" ]; then
-        print_info "Template available, run: cp em340.yaml.template config/em340.yaml"
-    fi
+    print_error "Sensor definitions file missing: config/sensors.yaml (should be in repository)"
 fi
 
 if [ -f ".env" ]; then

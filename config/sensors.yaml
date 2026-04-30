@@ -1,33 +1,8 @@
-config:
-  device: ${SERIAL_DEVICE:/dev/ttyUSB0}
-  t_delay_ms: ${DELAY_MS:50}
-  id: em340
-  modbus_address: ${MODBUS_ADDRESS:0x0001}
-  # Carlo Gavazzi EM340 serial number - used as MQTT subtopic identifier
-  # Format: 6 digits + 1 letter (e.g., "235411W")
-  # You can find this on the EM340 device label
-  # Can be set via DEVICE_SERIAL_NUMBER environment variable
-  serial_number: ${DEVICE_SERIAL_NUMBER:EM340_UNKNOWN}
+# Carlo Gavazzi EM340 ModBus register definitions
+# Static sensor/register definitions - hardware-specific, not runtime configuration.
+# Runtime configuration (MQTT broker, serial device, etc.) belongs in .env
 
-mqtt:
-  broker: ${MQTT_BROKER:localhost}
-  port: ${MQTT_PORT:1883}
-  username: ${MQTT_USERNAME:}
-  password: ${MQTT_PASSWORD:}
-  topic: ${MQTT_TOPIC:em340}
-
-logger:
-  log_file: /app/logs/em340d.log
-  # DEBUG, INFO, WARNING, ERROR, CRITICAL
-  log_level: ${LOG_LEVEL:INFO}
-  log_to_console: true
-  log_to_file: true
-  log_rotate: true
-  # in bytes
-  log_rotate_size: 1048576
-  log_rotate_count: 5
-
-sensor:
+sensors:
   - id: voltage_l1
     name: "Voltage L1-N"
     address: 0x0000
@@ -93,7 +68,7 @@ sensor:
     device_class: voltage
     multiply: 0.1
     skip: false
-  
+
   - id: current_l1
     name: "Current L1"
     address: 0x000C
@@ -115,7 +90,7 @@ sensor:
     device_class: current
     multiply: 0.001
     skip: false
-  
+
   - id: current_l3
     name: "Current L3"
     address: 0x0010
@@ -330,6 +305,7 @@ sensor:
     address: 0x0032
     register_count: 1
     value_type: INT16
+    multiply: 1
     skip: true
 
   - id: frequency

@@ -27,11 +27,12 @@ if [ ! -d "venv" ]; then
     # activate venv
     source venv/bin/activate
 
-    # upgrade pip
+    # upgrade pip and install Poetry
     pip install --upgrade pip
+    pip install poetry
 
-    # install requirements
-    pip install -r requirements.txt
+    # install project dependencies
+    poetry install --only main --no-interaction
 
     # deactivate venv
     deactivate

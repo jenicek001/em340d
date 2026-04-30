@@ -89,7 +89,7 @@ print_info "EM340D Update Tool"
 print_info "=================="
 
 # Check if we're in the right directory
-if [ ! -f "docker-compose.yml" ] || [ ! -f "em340.py" ]; then
+if [ ! -f "docker-compose.yml" ] || [ ! -f "src/em340.py" ]; then
     print_error "This doesn't appear to be the EM340D directory"
     print_info "Please run this script from the EM340D project directory"
     exit 1
@@ -194,7 +194,7 @@ if [ "$NO_BACKUP" = false ]; then
     BACKUP_DIR="backup_$(date +%Y%m%d_%H%M%S)"
     mkdir -p "$BACKUP_DIR"
     
-    for file in .env em340.yaml config/em340.yaml; do
+    for file in .env; do
         if [ -f "$file" ]; then
             cp "$file" "$BACKUP_DIR/" 2>/dev/null
             print_info "Backed up: $file"
@@ -232,13 +232,7 @@ if [ -f ".env" ] && [ -f ".env.template" ]; then
     fi
 fi
 
-if [ -f "em340.yaml" ] && [ -f "em340.yaml.template" ]; then
-    if ! diff -q em340.yaml em340.yaml.template >/dev/null 2>&1; then
-        print_warning "YAML configuration template has changed"
-        print_info "Please review em340.yaml.template for new options"
-        print_info "Your current em340.yaml has been preserved"
-    fi
-fi
+
 
 # Rebuild Docker container
 print_step "Rebuilding Docker container..."

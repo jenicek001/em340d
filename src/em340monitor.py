@@ -2,13 +2,17 @@ import threading
 import queue
 import serial
 import datetime
-from datetime import timedelta
-import yaml # pip install PyYAML
+import os
 import sys
+from datetime import timedelta
 from logger import log
+from config_loader import load_sensors
 import paho.mqtt.client as mqtt
 import json
 import time
+
+# Base directory of the project (parent of src/)
+_BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 start_time = datetime.datetime.now()
 
@@ -315,15 +319,30 @@ class ModBusParser(threading.Thread):
 if __name__ == '__main__':
     log.info('Starting EM340 ModBus sniffer to MQTT...')
 
+    sensors_file = os.getenv('SENSORS_FILE', os.path.join(_BASE_DIR, 'config', 'sensors.yaml'))
     try:
-        em340_config = yaml.load(open('em340.yaml'), Loader=yaml.FullLoader)
+        sensor_list = load_sensors(sensors_file)
     except Exception as e:
-        log.error(f'Error loading YAML file: {e}')
-        sys.exit()
+        log.error(f'Error loading sensors file: {e}')
+        sys.exit(1)
 
-    device = em340_config['config']['device']
-    modbus_address = em340_config['config']['modbus_address']
-    t_delay_seconds = em340_config['config']['t_delay_ms'] / 1000.0
+    device = os.getenv('SERIAL_DEVICE', '/dev/ttyUSB0')
+    modbus_address = int(os.getenv('MODBUS_ADDRESS', '1'))
+
+    # Build config dict compatible with MqttSender and ModBusParser expectations
+    em340_config = {
+        'config': {
+            'name': os.getenv('DEVICE_SERIAL_NUMBER', 'EM340_UNKNOWN'),
+        },
+        'mqtt': {
+            'broker': os.getenv('MQTT_BROKER', 'localhost'),
+            'port': int(os.getenv('MQTT_PORT', '1883')),
+            'username': os.getenv('MQTT_USERNAME', ''),
+            'password': os.getenv('MQTT_PASSWORD', ''),
+            'topic': os.getenv('MQTT_TOPIC', 'em340'),
+        },
+        'sensor': sensor_list,
+    }
 
     q = queue.Queue()
     mqtt_q = queue.Queue()
@@ -334,12 +353,8 @@ if __name__ == '__main__':
     parser.start()
     sender.start()
     try:
-        # sleep forever and let threads do their job
         while True:
-            # sleep to reduce CPU usage
             time.sleep(10)
-            pass
-            
     except KeyboardInterrupt:
         reader.join()
         parser.join()
