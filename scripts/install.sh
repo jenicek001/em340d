@@ -31,8 +31,8 @@ if [ ! -d "venv" ]; then
     pip install --upgrade pip
     pip install poetry
 
-    # install project dependencies
-    poetry install --only main --no-interaction
+    # install project dependencies into the active venv
+    POETRY_VIRTUALENVS_CREATE=false poetry install --only main --no-interaction
 
     # deactivate venv
     deactivate
