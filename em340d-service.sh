@@ -42,7 +42,7 @@ show_usage() {
 
 # Check if systemd service exists
 check_systemd_service() {
-    if systemctl list-unit-files | grep -q "em340d.service"; then
+    if systemctl list-unit-files | grep -q "em340d-docker.service"; then
         return 0
     else
         return 1
@@ -53,7 +53,7 @@ case "$1" in
     start)
         print_info "Starting EM340D service..."
         if check_systemd_service; then
-            sudo systemctl start em340d.service
+            sudo systemctl start em340d-docker.service
             docker compose ps
         else
             docker compose up -d
@@ -63,7 +63,7 @@ case "$1" in
     stop)
         print_info "Stopping EM340D service..."
         if check_systemd_service; then
-            sudo systemctl stop em340d.service
+            sudo systemctl stop em340d-docker.service
         else
             docker compose down
         fi
@@ -72,7 +72,7 @@ case "$1" in
     restart)
         print_info "Restarting EM340D service..."
         if check_systemd_service; then
-            sudo systemctl restart em340d.service
+            sudo systemctl restart em340d-docker.service
         else
             docker compose restart
         fi
@@ -85,7 +85,7 @@ case "$1" in
         
         if check_systemd_service; then
             print_info "Systemd service status:"
-            sudo systemctl status em340d.service --no-pager -l
+            sudo systemctl status em340d-docker.service --no-pager -l
             echo ""
         fi
         
@@ -109,7 +109,7 @@ case "$1" in
                     ./logs.sh -f
                     ;;
                 2)
-                    sudo journalctl -u em340d.service -f
+                    sudo journalctl -u em340d-docker.service -f
                     ;;
                 *)
                     print_warning "Invalid choice, showing application logs"
@@ -124,7 +124,7 @@ case "$1" in
     enable)
         print_info "Enabling auto-start on boot..."
         if check_systemd_service; then
-            sudo systemctl enable em340d.service
+            sudo systemctl enable em340d-docker.service
             print_success "EM340D will start automatically on boot"
         else
             print_warning "Systemd service not found"
@@ -135,7 +135,7 @@ case "$1" in
     disable)
         print_info "Disabling auto-start on boot..."
         if check_systemd_service; then
-            sudo systemctl disable em340d.service
+            sudo systemctl disable em340d-docker.service
             print_success "EM340D auto-start disabled"
         else
             print_warning "Systemd service not found, checking Docker restart policy"
