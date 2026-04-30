@@ -17,33 +17,20 @@ else
     echo "python package venv found"
 fi
 
-# check if venv is created
-if [ ! -d "venv" ]; then
-    echo "venv not found, creating venv"
-    python3 -m venv venv
-
-    chown -R em340:em340 venv
-
-    # activate venv
-    source venv/bin/activate
-
-    # upgrade pip and install Poetry
-    pip install --upgrade pip
-    pip install poetry
-
-    # install project dependencies into the active venv
-    POETRY_VIRTUALENVS_CREATE=false poetry install --only main --no-interaction
-
-    # deactivate venv
-    deactivate
-
-    # find line in venv/bin/activate with string VIRTUAL_ENV and replace it with VIRTUAL_ENV=/opt/em340d/venv
-    sed -i 's/VIRTUAL_ENV=\".*\"/VIRTUAL_ENV=\"\/opt\/em340d\/venv\"/g' venv/bin/activate
-
-    echo "venv created"
+# install poetry if not already present
+if ! command -v poetry >/dev/null 2>&1; then
+    echo "poetry not found, installing poetry"
+    pip3 install --upgrade pip
+    pip3 install poetry
 else
-    echo "venv found"
+    echo "poetry found"
 fi
+
+# install project dependencies
+# Use in-project virtualenv so 'poetry run' works regardless of which user runs the service
+POETRY_VIRTUALENVS_IN_PROJECT=true poetry install --only main --no-interaction
+
+echo "dependencies installed"
 
 # check if user em340 is in group dialout
 if ! id -nG em340 | grep -qw dialout; then
