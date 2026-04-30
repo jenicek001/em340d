@@ -5,7 +5,7 @@ description = "Carlo Gavazzi EM340 ModBus to MQTT Gateway"
 authors = []
 readme = "README.md"
 license = "MIT"
-packages = [{ include = "*.py", from = "src" }]
+package-mode = false
 
 [tool.poetry.dependencies]
 python = "^3.10"
