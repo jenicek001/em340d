@@ -3,7 +3,6 @@
 Test script to verify ModBus register block organisation
 """
 import os
-import sys
 from config_loader import load_sensors
 
 # Locate sensors.yaml relative to the project root
