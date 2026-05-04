@@ -42,6 +42,52 @@ Example: `em340/235411W`
 - USB-RS485 converter (e.g., CH340-based)
 - Carlo Gavazzi EM340 meter with RS485 connection
 - MQTT broker (Mosquitto, Home Assistant, etc.)
+- **Docker Engine** (for Docker deployment — see install steps below)
+
+#### Installing Docker Engine (Ubuntu / Raspberry Pi OS)
+
+The official one-step install method:
+```bash
+curl -fsSL https://get.docker.com | sudo sh
+```
+
+Or, using the official Docker apt repository (recommended for production):
+```bash
+# Remove any unofficial Docker packages first
+sudo apt remove docker.io docker-compose docker-compose-v2 podman-docker containerd runc 2>/dev/null || true
+
+# Set up Docker's official GPG key and repository
+sudo apt update
+sudo apt install ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/$(. /etc/os-release && echo "$ID")/gpg \
+  -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+# Add the repository to apt sources
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+  https://download.docker.com/linux/$(. /etc/os-release && echo "$ID") \
+  $(. /etc/os-release && echo "${VERSION_CODENAME}") stable" | \
+  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+# Install Docker Engine + Compose plugin
+sudo apt update
+sudo apt install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+# Verify installation
+sudo docker run hello-world
+```
+
+**Allow running Docker without `sudo`** (required — log out and back in after):
+```bash
+sudo groupadd docker 2>/dev/null || true
+sudo usermod -aG docker $USER
+newgrp docker   # Apply immediately in current shell
+docker run hello-world  # Verify non-root access
+```
+
+> For Raspberry Pi OS the steps are identical. Official docs: https://docs.docker.com/engine/install/raspberry-pi-os/
 
 ### Installation Options
 
@@ -55,14 +101,11 @@ Example: `em340/235411W`
 
 2. **Set up configuration**:
    ```bash
-   # Create environment file
+   # Create environment file from template
    cp .env.template .env
    
-   # Create configuration directory and file
-   mkdir -p config
-   cp em340.yaml.template config/em340.yaml
-   
-   # Note: em340.yaml and .env files are in .gitignore (contain user-specific settings)
+   # Note: config/em340.yaml is already included in the repo with ${VAR:default} syntax.
+   # All runtime settings are driven by the .env file — no YAML editing required.
    ```
 
 3. **Configure MQTT settings** (edit `.env`):
@@ -164,29 +207,29 @@ docker compose up -d  # Container will restart automatically
    git clone https://github.com/jenicek001/em340d.git
    cd em340d
    
-   # Create virtual environment
+   # Option A: Poetry (matches Docker environment exactly)
+   pip install poetry
+   poetry install
+   poetry shell
+   
+   # Option B: plain pip with virtual environment
    python3 -m venv venv
    source venv/bin/activate
-   
-   # Install dependencies
    pip install -r requirements.txt
    ```
 
 3. **Configure the application**:
    ```bash
-   # Copy and edit configuration
-   cp em340.yaml.template em340.yaml
-   nano em340.yaml
+   # Copy and edit environment file
+   cp .env.template .env
+   nano .env
    ```
    
-   Edit the MQTT section:
-   ```yaml
-   mqtt:
-     broker: 192.168.1.100      # Your MQTT broker IP
-     port: 1883
-     username: your_username    # Optional
-     password: your_password    # Optional
-     topic: em340
+   Edit the key values:
+   ```bash
+   MQTT_BROKER=192.168.1.100      # Your MQTT broker IP
+   SERIAL_DEVICE=/dev/ttyUSB0
+   DEVICE_SERIAL_NUMBER=235411W
    ```
 
 4. **Set up serial port access**:
@@ -197,8 +240,12 @@ docker compose up -d  # Container will restart automatically
 
 5. **Run the application**:
    ```bash
+   # With Poetry:
+   poetry run python src/em340.py
+   
+   # With venv:
    source venv/bin/activate
-   python em340.py
+   python src/em340.py
    ```
 
 ## 🔗 **Hardware Connection**
@@ -258,8 +305,8 @@ DELAY_MS=50                   # Delay between ModBus reads (ms)
 TZ=UTC                        # Timezone for timestamps
 ```
 
-### YAML Configuration (config/em340.yaml or em340.yaml)
-The application uses a template-based configuration system. The `em340.yaml.template` file contains placeholders that are replaced with environment variables:
+### YAML Configuration (config/em340.yaml)
+The application uses a template-based configuration system. `config/em340.yaml` (included in the repo) uses `${VAR:default}` placeholders that are resolved from the `.env` file at runtime:
 
 ```yaml
 mqtt:
@@ -488,7 +535,6 @@ env | grep -E "(MQTT_|SERIAL_|MODBUS_|DEVICE_)"
 
 # Reset configuration from template
 cp .env.template .env.new
-cp em340.yaml.template em340.yaml.new
 # Compare and merge: diff .env .env.new
 ```
 
@@ -658,16 +704,15 @@ git diff HEAD..origin/main
 
 **1. Configuration File Changes:**
 ```bash
-# If configuration templates change
+# If .env.template changes, compare with your settings
 cp .env.template .env.new
-cp em340.yaml.template em340.yaml.new
-
-# Compare with your current settings
 diff .env .env.new
-diff em340.yaml em340.yaml.new
 
 # Merge changes manually, then cleanup
-rm .env.new em340.yaml.new
+rm .env.new
+
+# For config/em340.yaml changes:
+git diff HEAD config/em340.yaml   # See what changed in the template
 ```
 
 **2. Breaking Changes:**
@@ -745,10 +790,9 @@ docker volume ls | grep logs
 ./scripts/em340d-service.sh stop
 docker compose down -v
 docker system prune -a -f
-rm -f .env em340.yaml  # Remove local config
+rm -f .env             # Remove local config (config/em340.yaml is from repo)
 git pull
 cp .env.template .env  # Reconfigure from scratch
-cp em340.yaml.template em340.yaml
 ```
 
 #### 📝 **Version Information**
@@ -805,7 +849,7 @@ sudo stty -F /dev/ttyUSB0 9600 raw -echo
 ### Test ModBus Communication
 ```bash
 # Use the included configuration tool
-python em340config.py  # Configure EM340 meter settings
+python src/em340config.py  # Configure EM340 meter settings
 ```
 
 ## 🔄 **Reliability and Retry Mechanisms**
@@ -974,12 +1018,20 @@ DEVICE_SERIAL_NUMBER=567892X
 MODBUS_ADDRESS=2
 ```
 
-## � **Repository Structure**
+## 🗂️ **Repository Structure**
 
 ```
 em340d/
-├── config/                    # Configuration files
-│   └── em340.yaml            # Runtime configuration (Docker)
+├── src/                       # Application source code
+│   ├── em340.py               # Main application (USB auto-reconnect)
+│   ├── config_loader.py       # YAML loader with ${VAR:default} substitution
+│   ├── logger.py              # Centralized logging
+│   ├── em340config.py         # EM340 configuration utility
+│   ├── em340monitor.py        # ModBus traffic monitor
+│   └── em340_config_manager.py  # MQTT remote configuration service
+├── config/                    # Configuration (in repo)
+│   ├── em340.yaml             # Runtime config template (${VAR:default} syntax)
+│   └── sensors.yaml           # Sensor register definitions
 ├── docs/                      # Documentation
 │   ├── DEPLOYMENT_ANALYSIS.md
 │   ├── DOCKER_COMPOSE_V2_FIX.md
@@ -992,14 +1044,13 @@ em340d/
 │   ├── RASPBERRY_PI_FIXES.md
 │   ├── SERIAL_ACCESS_SOLUTIONS.md
 │   ├── SERIAL_NUMBER_UPDATE.md
-│   └── USB_RECONNECTION.md    # 🆕 USB device reconnection guide
+│   └── USB_RECONNECTION.md
 ├── scripts/                   # Utility and deployment scripts
 │   ├── demo_mqtt_config.sh
 │   ├── deploy-with-user-mapping.sh
-│   ├── deploy-usb-reconnection-fix.sh  # 🆕
+│   ├── deploy-usb-reconnection-fix.sh
 │   ├── docker-deploy.sh
 │   ├── em340.sh
-│   ├── em340d-service.sh
 │   ├── install-autostart.sh
 │   ├── install.sh
 │   ├── logs.sh
@@ -1009,7 +1060,7 @@ em340d/
 │   ├── setup-serial-access.sh
 │   ├── test-mqtt-connectivity.sh
 │   ├── test-serial-docker.sh
-│   ├── test-usb-reconnection.sh  # 🆕
+│   ├── test-usb-reconnection.sh
 │   ├── troubleshoot.sh
 │   └── update.sh
 ├── tests/                     # Test files
@@ -1024,45 +1075,41 @@ em340d/
 │   ├── test_mqtt_config.py
 │   └── testtz.py
 ├── tools/                     # Monitoring and health check tools
-│   ├── health_check.py        # 🆕 Device health verification
-│   └── watchdog.sh            # 🆕 External monitoring script
+│   ├── health_check.py        # Device health verification
+│   └── watchdog.sh            # External monitoring script
 ├── .env                       # Environment configuration (not in repo)
-├── .env.template             # Environment variables template
-├── comments.txt
-├── config_loader.py          # YAML configuration with env vars
-├── docker-compose.yml        # Docker services definition
-├── Dockerfile                # Container image definition
-├── em340.py                  # Main application
-├── em340.yaml                # Configuration (Direct Python)
-├── em340.yaml.template       # Configuration template
-├── em340config.py            # EM340 configuration utility
-├── em340d.service            # Systemd service file
-├── em340monitor.py           # ModBus monitoring tool
-├── logger.py                 # Logging configuration
-├── LICENSE                   # MIT License
-├── README.md                 # This file
-└── requirements.txt          # Python dependencies
+├── .env.template              # Environment variables template
+├── config/                    # Configuration files (in repo)
+│   ├── em340.yaml             # Runtime config template with ${VAR:default} syntax
+│   └── sensors.yaml           # Sensor register definitions
+├── docker-compose.yml         # Docker services definition
+├── Dockerfile                 # Container image definition
+├── em340d-docker.service      # Systemd service file for Docker
+├── em340d-service.sh          # Service management helper (root)
+├── pyproject.toml             # Python project / dependency manifest (Poetry)
+├── requirements.txt           # Python dependencies (pip alternative)
+├── LICENSE                    # MIT License
+└── README.md                  # This file
 ```
 
 ## 📚 **File Reference**
 
-### Core Application Files
-- **`em340.py`** - Main application with automatic USB reconnection 🆕
-- **`config_loader.py`** - Configuration loader with environment variable support
-- **`logger.py`** - Centralized logging configuration
-- **`em340config.py`** - EM340 configuration utility
-- **`em340monitor.py`** - ModBus traffic monitoring tool
-- **`em340_config_manager.py`** - MQTT-based remote configuration
+### Core Application Files (`src/`)
+- **`src/em340.py`** - Main application with automatic USB reconnection
+- **`src/config_loader.py`** - Configuration loader with environment variable support
+- **`src/logger.py`** - Centralized logging configuration
+- **`src/em340config.py`** - EM340 configuration utility
+- **`src/em340monitor.py`** - ModBus traffic monitoring tool
+- **`src/em340_config_manager.py`** - MQTT-based remote configuration
 
 ### Configuration Files
-- **`.env`** - Environment variables (Docker, not in repo)
+- **`.env`** - Environment variables (not in repo — created from template)
 - **`.env.template`** - Environment variables template
-- **`config/em340.yaml`** - Configuration file (Docker)
-- **`em340.yaml`** - Configuration file (Direct installation)
-- **`em340.yaml.template`** - Configuration template
+- **`config/em340.yaml`** - Configuration template with `${VAR:default}` substitution
+- **`config/sensors.yaml`** - Sensor register map (read-only, bundled in image)
 
 ### Docker Files
-- **`docker-compose.yml`** - Docker services with USB resilience 🆕
+- **`docker-compose.yml`** - Docker services with USB resilience
 - **`Dockerfile`** - Container image definition
 - **`em340d.service`** - Systemd service file
 - **`requirements.txt`** - Python dependencies
@@ -1133,41 +1180,18 @@ em340d/
 - **[DEPLOYMENT_ANALYSIS.md](docs/DEPLOYMENT_ANALYSIS.md)** - Deployment strategies
 - **[RASPBERRY_PI_FIXES.md](docs/RASPBERRY_PI_FIXES.md)** - Platform-specific solutions
 
-## �📚 **File Reference (Legacy)**
-
-### Key Files
-- **`.env`** - Environment variables (Docker)
-- **`config/em340.yaml`** - Configuration file (Docker)
-- **`em340.yaml`** - Configuration file (Direct installation)
-- **`docker-compose.yml`** - Docker services definition
-- **`requirements.txt`** - Python dependencies
-
-### Scripts
-- **`quick-rebuild.sh`** - Fast Docker rebuild and deployment
-- **`logs.sh`** - Enhanced log viewer with filtering
-- **`troubleshoot.sh`** - System diagnostic tool
-- **`setup-serial-access.sh`** - Serial port permissions setup
-- **`test_mqtt_config.py`** 🆕 - Interactive MQTT configuration tool
-- **`update.sh`** 🆕 - Automated update script with backup and verification
-
-### Documentation
-- **`LOGGING_GUIDE.md`** - Comprehensive logging documentation
-- **`DOCKER_SERIAL_FIX.md`** - Docker serial port access solutions
-- **`SERIAL_ACCESS_SOLUTIONS.md`** - Serial port permission solutions
-- **`MQTT_CONFIGURATION.md`** 🆕 - Complete MQTT configuration guide
-
 ## 📞 **Support**
 
 ### Getting Help
-1. **Run diagnostics**: `./troubleshoot.sh`
-2. **Check logs**: `./logs.sh -f -l ERROR`
+1. **Run diagnostics**: `./scripts/troubleshoot.sh`
+2. **Check logs**: `./scripts/logs.sh -f -l ERROR`
 3. **Verify configuration**: Check `.env` and `config/em340.yaml`
 4. **Test hardware**: Verify USB-RS485 connection and EM340 wiring
 
 ### Common Solutions Summary
 | Issue | Quick Fix |
 |-------|-----------|
-| USB device disconnect 🆕 | Automatic recovery - no action needed! |
+| USB device disconnect | Automatic recovery - no action needed! |
 | MQTT connection failed | Check `MQTT_BROKER` in `.env` |
 | Serial permission denied | Run `sudo ./scripts/setup-serial-access.sh` |
 | Container won't start | Run `./scripts/quick-rebuild.sh` |
