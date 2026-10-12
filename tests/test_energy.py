@@ -5,6 +5,8 @@ from zoneinfo import ZoneInfo
 import pytest
 
 import energy
+from modbus_bus import HIGH, ModbusBus
+from tests.modbus_sim import SimBus
 
 PRAGUE = ZoneInfo("Europe/Prague")
 
@@ -14,36 +16,35 @@ def regs32(value):
     return [value & 0xFFFF, value >> 16]
 
 
+def em340_registers(imp=3180.812, exp=15619.204, coarse=None):
+    """The EM340's energy registers: 3-decimal totalizers at 0x0400 and the 0.1 kWh ones at 0x0034/0x004E."""
+    regs = {}
+
+    def put(address, words):
+        for n, w in enumerate(words):
+            regs[address + n] = w
+    for address, kwh in ((0x0400, imp), (0x0408, exp)):
+        whole = int(kwh)
+        put(address, regs32(whole) + regs32(round((kwh - whole) * 1000)))
+    c_imp, c_exp = coarse or (imp, exp)
+    put(0x0034, regs32(int(c_imp * 10)))
+    put(0x004E, regs32(int(c_exp * 10)))
+    return regs
+
+
 def fine_block(imp, exp):
-    """The 12 registers at 0x0400 for the given kWh (kvarh in between are zeros)."""
-    def part(kwh):
-        i = int(kwh)
-        return regs32(i) + regs32(round((kwh - i) * 1000))
-    return part(imp) + [0, 0, 0, 0] + part(exp)
+    regs = em340_registers(imp, exp)
+    return [regs.get(0x0400 + n, 0) for n in range(12)]
 
 
-class Meter:
-    def __init__(self, imp=3180.812, exp=15619.204, fine=True, coarse=None):
-        self.imp, self.exp, self.has_fine = imp, exp, fine
-        self.coarse = coarse
-        self.reads = []
-        self.clock, self.last = None, 0.0
-
-    def read_registers(self, address, number_of_registers):
-        if self.reads and self.clock is not None and self.clock() - self.last < 0.049:
-            raise IOError("No communication with the instrument (no answer)")    # the real meter's turnaround
-        self.last = self.clock() if self.clock is not None else 0.0
-        self.reads.append((address, number_of_registers))
-        if address == energy.FINE_START:
-            if not self.has_fine:
-                raise IOError("no answer")
-            return fine_block(self.imp, self.exp)
-        coarse_imp, coarse_exp = self.coarse or (self.imp, self.exp)
-        if address == energy.COARSE_IMPORT:
-            return regs32(int(coarse_imp * 10))
-        if address == energy.COARSE_EXPORT:
-            return regs32(int(coarse_exp * 10))
-        raise AssertionError(hex(address))
+@pytest.fixture
+def meter():
+    sim = SimBus(turnaround_s=0.01)
+    sim.slave(1, em340_registers())
+    bus = ModbusBus("/dev/sim", turnaround_s=0.01, instrument_factory=sim.instrument)
+    bus.start()
+    yield sim, bus
+    bus.stop()
 
 
 def test_integer_and_decimal_parts_make_1_wh_resolution():
@@ -57,25 +58,44 @@ def test_a_short_block_is_an_error():
         energy.parse_fine_block([0] * 8)
 
 
-def test_the_fine_totalizers_are_used_when_they_agree_with_the_coarse_registers():
-    m = Meter()
-    r = energy.EnergyReader(lambda: m, sleep=lambda s: None)
+def test_the_fine_totalizers_are_used_when_they_agree_with_the_coarse_registers(meter):
+    sim, bus = meter
+    r = energy.EnergyReader(bus, 1)
     assert r.read() == (3180.812, 15619.204, 0.001) and r.fine is True
-    m.reads.clear()
-    m.imp = 3180.9
-    assert r.read()[0] == 3180.9 and m.reads == [(0x0400, 12)]                # one block per read afterwards
+    n = len(sim.log)
+    r.read()
+    assert [e[2:4] for e in sim.log[n:]] == [(0x0400, 12)]                    # one block per read afterwards
+    assert sim.turnaround_violations == 0                                     # the bus keeps the meter's pause
 
 
-def test_the_coarse_registers_are_used_when_the_meter_has_no_fine_totalizers():
-    m = Meter(fine=False)
-    r = energy.EnergyReader(lambda: m, sleep=lambda s: None)
+def test_the_coarse_registers_are_used_when_the_meter_reports_no_fine_totalizers(meter):
+    sim, bus = meter
+    sim.faults = ["illegal"]                                                  # the meter: illegal data address
+    r = energy.EnergyReader(bus, 1)
     assert r.read() == (3180.8, 15619.2, 0.1) and r.fine is False
 
 
-def test_the_coarse_registers_are_used_when_the_two_disagree():
-    m = Meter(coarse=(3100.0, 15619.2))
-    r = energy.EnergyReader(lambda: m, sleep=lambda s: None)
+def test_the_coarse_registers_are_used_when_the_two_disagree(meter):
+    sim, bus = meter
+    sim.slave(1, em340_registers(coarse=(3100.0, 15619.2)))
+    r = energy.EnergyReader(bus, 1)
     assert r.read()[2] == 0.1 and r.fine is False
+
+
+def test_a_meter_that_does_not_answer_decides_nothing(meter):
+    sim, bus = meter
+    sim.faults = ["no_answer", "no_answer"]                                   # the read and its one retry
+    r = energy.EnergyReader(bus, 1)
+    with pytest.raises(IOError):
+        r.read()
+    assert r.fine is None                                                     # checked again next time
+    assert r.read()[2] == 0.001
+
+
+def test_a_snapshot_read_goes_first(meter):
+    sim, bus = meter
+    r = energy.EnergyReader(bus, 1)
+    assert r.read(priority=HIGH)[0] == 3180.812
 
 
 def at(text):
@@ -127,25 +147,3 @@ def test_the_snapshot_payload():
 
 def test_the_clock_check_answers_without_failing():
     assert energy.clock_synchronized() in (True, False, None)
-
-
-def test_every_request_waits_the_meters_turnaround_like_the_regular_poll():
-    # 2026-10-12 on the real EM340: three requests back to back -> "no answer" on every read
-    now = [0.0]
-    m = Meter()
-    m.clock = lambda: now[0]
-
-    def sleep(s):
-        now[0] += s
-    r = energy.EnergyReader(lambda: m, delay_s=0.05, sleep=sleep)
-    assert r.read() == (3180.812, 15619.204, 0.001)                         # check (3 requests) and read
-    assert len(m.reads) == 4
-
-
-def test_without_the_pause_the_meter_does_not_answer():
-    now = [0.0]
-    m = Meter()
-    m.clock = lambda: now[0]
-    r = energy.EnergyReader(lambda: m, delay_s=0.0, sleep=lambda s: None)
-    with pytest.raises(IOError):
-        r.read()

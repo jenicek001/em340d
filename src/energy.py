@@ -2,7 +2,8 @@
 
 The EM340's "kWh (+) TOT" / "kWh (-) TOT" at 0x0034 / 0x004E have a weight of kWh x 10, a resolution of
 0.1 kWh. Meters made from 2018-10-01 also have 3-decimal totalizers (protocol v2 rev. 17, section 2.5,
-Table 2.5-1), read here as one block of 12 registers so both parts of each value come from the same moment:
+Table 2.5-1), read here through the ModbusBus as one block of 12 registers so both parts of each value come
+from the same moment:
 
     0x0400 kWh (+) TOT, integer part   INT32  INT(kWh) x 1
     0x0402 kWh (+) TOT, decimal part   INT32  DEC(kWh) x 1000  (MSW always 0)
@@ -18,9 +19,12 @@ import ctypes
 import ctypes.util
 import time
 from datetime import datetime, timezone
-from typing import Callable, Optional, Tuple
+from typing import Optional, Tuple
+
+import minimalmodbus
 
 from logger import log
+from modbus_bus import NORMAL
 
 FINE_START = 0x0400
 FINE_COUNT = 12
@@ -51,33 +55,32 @@ def parse_fine_block(regs) -> Tuple[float, float]:
 
 
 class EnergyReader:
-    """The import and export totals at the best resolution the meter has. The 3-decimal totalizers are
-    checked once against the 0.1 kWh registers; if they do not answer or disagree, the coarse registers are
-    used from then on, with resolution_kwh 0.1."""
+    """The import and export totals at the best resolution the meter has, read through the ModbusBus (#12),
+    which keeps the meter's turnaround and retries. The 3-decimal totalizers are checked once against the
+    0.1 kWh registers. Only the meter itself can say they are missing (a slave exception: illegal address)
+    or a disagreement can disqualify them; then the 0.1 kWh registers are used, with resolution_kwh 0.1. A
+    timeout or an unavailable bus decides nothing: the next read checks again."""
 
-    def __init__(self, instrument: Callable, delay_s: float = 0.05, sleep: Callable = time.sleep):
-        self._instrument = instrument           # a getter: the instrument is replaced after a reconnect
-        self.delay_s, self._sleep = delay_s, sleep
+    def __init__(self, bus, slave: int):
+        self.bus, self.slave = bus, slave
         self.fine: Optional[bool] = None
 
-    def _read(self, address: int, count: int):
-        """One request, after the meter's turnaround pause (DELAY_MS): back-to-back requests go unanswered."""
-        self._sleep(self.delay_s)
-        return self._instrument().read_registers(address, number_of_registers=count)
+    def _read(self, address: int, count: int, priority: int):
+        return self.bus.read_registers(self.slave, address, count, priority=priority)
 
-    def _coarse(self) -> Tuple[float, float]:
-        imp = int32(*self._read(COARSE_IMPORT, 2)) * COARSE_WEIGHT
-        exp = int32(*self._read(COARSE_EXPORT, 2)) * COARSE_WEIGHT
+    def _coarse(self, priority: int) -> Tuple[float, float]:
+        imp = int32(*self._read(COARSE_IMPORT, 2, priority)) * COARSE_WEIGHT
+        exp = int32(*self._read(COARSE_EXPORT, 2, priority)) * COARSE_WEIGHT
         return round(imp, 1), round(exp, 1)
 
-    def _check_fine(self):
+    def _check_fine(self, priority: int):
         try:
-            fine = parse_fine_block(self._read(FINE_START, FINE_COUNT))
-        except (IOError, ValueError) as err:
+            fine = parse_fine_block(self._read(FINE_START, FINE_COUNT, priority))
+        except (minimalmodbus.SlaveReportedException, ValueError) as err:
             log.warning(f"3-decimal energy totalizers (0x0400) not available ({err}); using 0x0034/0x004E, 0.1 kWh")
             self.fine = False
             return
-        coarse = self._coarse()
+        coarse = self._coarse(priority)
         if all(abs(f - c) <= AGREEMENT_KWH for f, c in zip(fine, coarse)):
             log.info(f"Energy at 1 Wh resolution from 0x0400/0x0408: import {fine[0]:.3f} kWh, export {fine[1]:.3f} kWh "
                      f"(0.1 kWh registers {coarse[0]:.1f} / {coarse[1]:.1f})")
@@ -86,14 +89,14 @@ class EnergyReader:
             log.warning(f"3-decimal totalizers {fine} disagree with the 0.1 kWh registers {coarse}; using 0.1 kWh")
             self.fine = False
 
-    def read(self) -> Tuple[float, float, float]:
-        """(import kWh, export kWh, resolution kWh). Raises IOError like any other read."""
+    def read(self, priority: int = NORMAL) -> Tuple[float, float, float]:
+        """(import kWh, export kWh, resolution kWh). Raises what the bus raises (IOError, TimeoutError)."""
         if self.fine is None:
-            self._check_fine()
+            self._check_fine(priority)
         if self.fine:
-            imp, exp = parse_fine_block(self._read(FINE_START, FINE_COUNT))
+            imp, exp = parse_fine_block(self._read(FINE_START, FINE_COUNT, priority))
             return imp, exp, FINE_RESOLUTION
-        imp, exp = self._coarse()
+        imp, exp = self._coarse(priority)
         return imp, exp, COARSE_WEIGHT
 
 
