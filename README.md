@@ -248,6 +248,42 @@ docker compose up -d  # Container will restart automatically
    python src/em340.py
    ```
 
+## ⚡ **Energy at 1 Wh resolution and quarter-hour snapshots**
+
+**Resolution.** `total_energy_import` / `total_energy_export` on `em340/<serial>` come from the 3-decimal
+totalizers (protocol v2 rev. 17, §2.5, Table 2.5-1). They are read as one block of 12 registers, so the
+integer and decimal parts are from the same moment:
+
+| Register | Value |
+|---|---|
+| 0x0400 / 0x0402 | kWh (+) TOT: integer part (INT32) / decimal part × 1000 (INT32) |
+| 0x0408 / 0x040A | kWh (-) TOT: integer part / decimal part × 1000 |
+
+This gives **1 Wh**, instead of the 0.1 kWh of 0x0034 / 0x004E. At start the two are compared: if
+0x0400 does not answer (meters made before 2018-10-01) or disagrees by more than 0.1 kWh, the daemon logs
+it and keeps the 0.1 kWh registers, reported as `"resolution_kwh": 0.1`.
+
+**Quarter-hour snapshots.** At every boundary of 900 s from the epoch (hh:00, :15, :30, :45:00 in UTC
+and in local time alike) the daemon wakes, reads the totals and publishes them **retained**, QoS 1:
+
+```
+em340/<serial>/interval
+{"interval_end": "2026-10-11T14:15:00+02:00", "import_kwh_total": 3180.812, "export_kwh_total": 15619.204,
+ "read_at": "2026-10-11T14:15:00.083+02:00", "read_delay_ms": 83, "resolution_kwh": 0.001,
+ "serial": "<serial>", "seq": 12}
+```
+
+- The energy of a 15-minute interval is the difference of two consecutive snapshots, matching how the
+  Czech smart meter bills (15-minute integrals).
+- A boundary is published at most once. One reached more than 60 s late (a restart, a serial error) is
+  skipped, and the consumer spreads the energy over the gap. A read more than 5 s after its boundary is
+  logged as a warning.
+- `seq` counts the snapshots since the daemon started.
+
+**NTP is required.** The boundaries are only as accurate as the host's clock. Keep NTP running on the
+host (chrony or systemd-timesyncd; check with `timedatectl`: "System clock synchronized: yes"). The
+daemon logs the kernel's synchronisation state at start, and warns if the clock is not synchronised.
+
 ## 🔗 **Hardware Connection**
 
 ### EM340 to USB-RS485 Wiring
