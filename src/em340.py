@@ -172,11 +172,7 @@ class EM340:
             'device_id': self.serial_number,
         }
 
-        self.config_manager = EM340ConfigManager(
-            config_mqtt_config,
-            self.device,
-            self.modbus_address,
-        )
+        self.config_manager = EM340ConfigManager(config_mqtt_config, self.bus, self.modbus_address)
 
         if self.config_manager.start_config_service():
             log.info('EM340 configuration service started successfully')

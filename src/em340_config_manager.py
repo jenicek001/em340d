@@ -8,7 +8,6 @@ import json
 import time
 import paho.mqtt.client as mqtt
 from logger import log
-import minimalmodbus
 from typing import Dict, Any, Optional, Union
 
 class EM340ConfigManager:
@@ -111,21 +110,14 @@ class EM340ConfigManager:
         }
     }
     
-    def __init__(self, mqtt_config: Dict[str, Any], modbus_device: str, modbus_address: int):
-        """Initialize the configuration manager"""
+    def __init__(self, mqtt_config: Dict[str, Any], bus, modbus_address: int):
+        """Initialize the configuration manager. Every Modbus request goes through `bus`, the ModbusBus
+        the poll uses (#12): a command arriving on the MQTT thread during a poll waits its turn instead of
+        interleaving on the RS-485 bus (#8)."""
         self.mqtt_broker = mqtt_config.get('broker', 'localhost')
         self.mqtt_port = int(mqtt_config.get('port', 1883))
-        self.modbus_device = modbus_device
+        self.bus = bus
         self.modbus_address = modbus_address
-        
-        # Initialize ModBus connection
-        self.modbus = minimalmodbus.Instrument(modbus_device, modbus_address)
-        self.modbus.serial.baudrate = 9600
-        self.modbus.serial.bytesize = 8
-        self.modbus.serial.parity = minimalmodbus.serial.PARITY_NONE
-        self.modbus.serial.stopbits = 1
-        self.modbus.serial.timeout = 1.0  # Longer timeout for config operations
-        self.modbus.mode = minimalmodbus.MODE_RTU
         
         # Initialize MQTT client for configuration
         self.config_mqtt_client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
@@ -265,11 +257,11 @@ class EM340ConfigManager:
             address = register_info['address']
             log.info(f"Writing {parameter} = {value} to register 0x{address:04X}")
             
-            self.modbus.write_register(address, value, functioncode=6)
-            time.sleep(0.1)  # Short delay after write
+            self.bus.write_register(self.modbus_address, address, value)
+            time.sleep(0.1)  # Let the meter apply the setting before the read-back
             
             # Verify write by reading back
-            read_value = self.modbus.read_register(address)
+            read_value = self.bus.read_register(self.modbus_address, address)
             if read_value == value:
                 log.info(f"Successfully set {parameter} = {value}")
                 self.publish_parameter_status(parameter, value, "success")
@@ -290,7 +282,7 @@ class EM340ConfigManager:
             register_info = self.CONFIG_REGISTERS[parameter]
             address = register_info['address']
             
-            value = self.modbus.read_register(address)
+            value = self.bus.read_register(self.modbus_address, address)
             log.info(f"Read {parameter} = {value} from register 0x{address:04X}")
             
             # Convert to human-readable if possible
@@ -338,13 +330,12 @@ class EM340ConfigManager:
             for parameter, register_info in self.CONFIG_REGISTERS.items():
                 try:
                     address = register_info['address']
-                    value = self.modbus.read_register(address)
+                    value = self.bus.read_register(self.modbus_address, address)
                     backup_data[parameter] = {
                         'value': value,
                         'address': f"0x{address:04X}",
                         'description': register_info.get('description', '')
                     }
-                    time.sleep(0.05)  # Small delay between reads
                 except Exception as e:
                     log.warning(f"Could not backup parameter {parameter}: {e}")
                     backup_data[parameter] = {'error': str(e)}
