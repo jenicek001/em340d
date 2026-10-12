@@ -1,23 +1,36 @@
 #!/usr/bin/env python
-import minimalmodbus
-import serial
-import time
+"""EM340 ModBus to MQTT gateway.
+
+Every Modbus request goes through one ModbusBus (#12): it serialises the requests, keeps the meter's
+turnaround between them, retries a read once and reopens the port by itself after a failure. This module
+only decides what to read and publishes it:
+- the regular poll: the sensor blocks of config/sensors.yaml on em340/<serial>, every POLLING_INTERVAL_S;
+- at each quarter-hour boundary, first: the energy totals on em340/<serial>/interval, retained (#6).
+"""
+import json
 import os
 import sys
-import json
-import paho.mqtt.client as mqtt
+import time
 from datetime import datetime
+
+import paho.mqtt.client as mqtt
+import serial
 from dateutil import tz
-from logger import log
+
 from config_loader import load_sensors
 from em340_config_manager import EM340ConfigManager
 from energy import EnergyReader, QuarterHourSnapshots, clock_synchronized, snapshot_payload, wall_clock
+from logger import log
+from modbus_bus import HIGH, BusUnavailable, ModbusBus, serial_instrument_factory
 
 # Base directory of the project (parent of src/)
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Default path for sensor definitions
 _DEFAULT_SENSORS_FILE = os.path.join(_BASE_DIR, 'config', 'sensors.yaml')
+
+MAX_BLOCK_SIZE = 20
+MAX_GAP = 5
 
 
 def _getenv_int(name: str, default: int) -> int:
@@ -34,6 +47,52 @@ def _getenv_float(name: str, default: float) -> float:
     except ValueError:
         log.warning(f'Invalid value for {name}, using default {default}')
         return default
+
+
+def build_blocks(sensors, max_block_size: int = MAX_BLOCK_SIZE, max_gap: int = MAX_GAP):
+    """Contiguous sensors grouped into read blocks: one request per block."""
+    sensors = sorted((s for s in sensors if not s.get('skip', False)), key=lambda r: r['address'])
+    blocks, current = [], []
+    for sensor in sensors:
+        if current:
+            prev = current[-1]
+            gap = sensor['address'] - (prev['address'] + prev.get('register_count', 1))
+            needed = sensor['address'] + sensor.get('register_count', 1) - current[0]['address']
+            if gap < 0 or gap > max_gap or needed > max_block_size:
+                blocks.append(current)
+                current = []
+        current.append(sensor)
+    if current:
+        blocks.append(current)
+    return blocks
+
+
+def block_span(block):
+    start = block[0]['address']
+    return start, block[-1]['address'] + block[-1].get('register_count', 1) - start
+
+
+def _words(values, signed_bits):
+    value = 0
+    for i, word in enumerate(values):
+        value += word << (16 * i)
+    if signed_bits and value & (1 << (signed_bits - 1)):
+        value -= 1 << signed_bits
+    return value
+
+
+_TYPES = {'INT16': (1, 16), 'UINT16': (1, 0), 'INT32': (2, 32), 'UINT32': (2, 0), 'INT64': (4, 64), 'UINT64': (4, 0)}
+
+
+def decode_value(sensor, values):
+    """One sensor's value from its registers (least significant word first), times its multiplier."""
+    vt = sensor['value_type']
+    if vt not in _TYPES:
+        raise ValueError(f'Unknown value_type {vt} for sensor {sensor["name"]}')
+    count, signed_bits = _TYPES[vt]
+    if len(values) < count:
+        raise ValueError(f'{vt} sensor {sensor["name"]} needs {count} registers, got {len(values)}')
+    return _words(values[:count], signed_bits) * float(sensor['multiply'])
 
 
 class EM340:
@@ -55,7 +114,7 @@ class EM340:
 
         log.info(
             f'ModBus configuration: device={self.device}, address={self.modbus_address}, '
-            f'block_delay={self.t_delay_seconds}s, polling_interval={self.polling_interval}s'
+            f'turnaround={self.t_delay_seconds}s, polling_interval={self.polling_interval}s'
         )
 
         # Load sensor definitions from static YAML
@@ -67,11 +126,16 @@ class EM340:
             log.error(f'Error loading sensors file: {e}')
             sys.exit(1)
 
-        # Initialize serial connection with retry support
-        self._initialize_serial_connection()
+        # The one owner of the serial port (#12)
+        self.bus = ModbusBus(self.device, turnaround_s=self.t_delay_seconds,
+                             instrument_factory=serial_instrument_factory(timeout_s=0.5))
+        self.bus.start()
+
+        self._initialize_mqtt()
+        self._initialize_config_manager()
 
         # Energy at 1 Wh resolution and the quarter-hour snapshots (issue #6)
-        self.energy = EnergyReader(lambda: self.em340, delay_s=self.t_delay_seconds)
+        self.energy = EnergyReader(self.bus, self.modbus_address)
         self.snapshots = QuarterHourSnapshots(wall_clock())
         self.interval_topic = f'{self.mqtt_topic_base}/{self.serial_number}/interval'
         synced = clock_synchronized()
@@ -80,19 +144,8 @@ class EM340:
         else:
             log.info(f'Quarter-hour energy snapshots on {self.interval_topic}; clock synchronised: {synced}')
 
-    def _initialize_serial_connection(self):
-        """Initialize or reinitialize the serial connection to the ModBus device."""
-        self.em340 = minimalmodbus.Instrument(self.device, self.modbus_address)
-        self.em340.serial.baudrate = 9600
-        self.em340.serial.bytesize = 8
-        self.em340.serial.parity = serial.PARITY_NONE
-        self.em340.serial.stopbits = 1
-        self.em340.serial.timeout = 0.5
-        self.em340.mode = minimalmodbus.MODE_RTU
-
-        log.info(f'ModBus instrument configured: port={self.device}, baudrate=9600, timeout=0.5s')
-
-        # MQTT client setup with automatic reconnection
+    def _initialize_mqtt(self):
+        """Once, at start: the MQTT client reconnects by itself (paho), independently of the serial port."""
         log.info(f'Setting up MQTT client for broker: {self.mqtt_broker}:{self.mqtt_port}')
         self.mqtt_client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
         self.mqtt_client.username_pw_set(self.mqtt_username, self.mqtt_password)
@@ -107,9 +160,6 @@ class EM340:
             log.info('MQTT initial connection attempt initiated')
         except Exception as e:
             log.error(f'Initial MQTT connection failed: {e}')
-
-        # Initialize configuration manager
-        self._initialize_config_manager()
 
     def _initialize_config_manager(self):
         """Initialize the configuration manager for MQTT-based device configuration."""
@@ -145,75 +195,18 @@ class EM340:
         else:
             log.info('MQTT client disconnected.')
 
-    def _reconnect_serial_device(self, max_retries=None, base_delay=2.0, max_delay=60.0):
-        """
-        Attempt to reconnect to the serial device with exponential backoff.
-
-        Args:
-            max_retries: Maximum number of retry attempts (None for infinite).
-            base_delay: Initial delay between retries in seconds.
-            max_delay: Maximum delay between retries in seconds.
-
-        Returns:
-            True if reconnection successful, False otherwise.
-        """
-        retry_count = 0
-        delay = base_delay
-
-        while max_retries is None or retry_count < max_retries:
-            retry_count += 1
-            log.warning(f'Serial device disconnected. Attempting reconnection (attempt {retry_count})...')
-
-            try:
-                if hasattr(self.em340, 'serial') and hasattr(self.em340.serial, 'is_open'):
-                    try:
-                        if self.em340.serial.is_open:
-                            self.em340.serial.close()
-                            log.info('Closed old serial connection')
-                    except Exception:
-                        pass
-
-                log.info(f'Waiting {delay:.1f}s before reconnection attempt...')
-                time.sleep(delay)
-
-                if not os.path.exists(self.device):
-                    log.error(f'Device file {self.device} does not exist')
-                    delay = min(delay * 1.5, max_delay)
-                    continue
-
-                self._initialize_serial_connection()
-
-                log.info('Testing connection by reading device measurement mode...')
-                measurement_mode = self.em340.read_register(0x1103)
-                measurement_mode_type = chr(measurement_mode + 65)
-                log.info(f'Connection successful! Measurement mode: {measurement_mode_type}')
-                return True
-
-            except serial.SerialException as e:
-                log.error(f'Serial connection failed: {e}')
-            except IOError as e:
-                log.error(f'ModBus communication failed: {e}')
-            except Exception as e:
-                log.error(f'Unexpected error during reconnection: {e}')
-
-            delay = min(delay * 1.5, max_delay)
-
-        log.error(f'Failed to reconnect after {retry_count} attempts')
-        return False
+    # --- quarter-hour snapshots (#6) ---------------------------------------------------------------------
 
     def _publish_due_snapshot(self):
-        """At a quarter-hour boundary: read the energy totals and publish them, retained (issue #6)."""
+        """At a quarter-hour boundary: read the energy totals (first in the bus queue) and publish them retained."""
         boundary = self.snapshots.due(wall_clock())
         if boundary is None:
             return
         try:
-            imp, exp, resolution = self.energy.read()
-        except (IOError, ValueError, serial.SerialException) as err:
+            imp, exp, resolution = self.energy.read(priority=HIGH)
+        except (IOError, ValueError, TimeoutError, serial.SerialException) as err:
             log.error(f'Quarter-hour snapshot not read: {err}')
             return
-        finally:
-            # The meter's turnaround before the poll's first block (without it: "no answer" and a reconnect)
-            time.sleep(self.t_delay_seconds)
         payload = snapshot_payload(boundary, wall_clock(), imp, exp, resolution, self.serial_number, self.snapshots.seq)
         if payload['read_delay_ms'] > 5000:
             log.warning(f'Quarter-hour snapshot read {payload["read_delay_ms"]} ms after the boundary')
@@ -228,7 +221,7 @@ class EM340:
         """The regular message's total_energy_import/export at the best resolution (same names, kWh)."""
         try:
             imp, exp, _ = self.energy.read()
-        except (IOError, ValueError, serial.SerialException) as err:
+        except (IOError, ValueError, TimeoutError, serial.SerialException) as err:
             log.warning(f'Energy totals not read at 1 Wh resolution: {err}')
             return
         data['total_energy_import'] = imp
@@ -239,176 +232,57 @@ class EM340:
         to_boundary = self.snapshots.seconds_to_next(wall_clock()) + 0.01
         time.sleep(min(self.polling_interval, to_boundary))
 
-    def read_sensors(self):
-        """Main polling loop: read all sensors and publish to MQTT, then sleep for polling_interval."""
-        # Group contiguous registers into blocks for efficient reading
-        sensors = [r for r in self.sensors if not r.get('skip', False)]
-        sensors.sort(key=lambda r: r['address'])
+    # --- the regular poll --------------------------------------------------------------------------------
 
-        # Build blocks of contiguous registers
-        blocks = []
-        current_block = []
-        max_block_size = 20
-        max_gap = 5
-
-        for sensor in sensors:
-            if not current_block:
-                current_block = [sensor]
-                continue
-
-            prev_sensor = current_block[-1]
-            prev_end_addr = prev_sensor['address'] + prev_sensor.get('register_count', 1)
-            current_start_addr = sensor['address']
-            gap = current_start_addr - prev_end_addr
-            total_regs_needed = sensor['address'] + sensor.get('register_count', 1) - current_block[0]['address']
-
-            if gap < 0 or gap > max_gap or total_regs_needed > max_block_size:
-                blocks.append(current_block)
-                current_block = [sensor]
-            else:
-                current_block.append(sensor)
-
-        if current_block:
-            blocks.append(current_block)
-
-        log.info(f'Organised {len(sensors)} sensors into {len(blocks)} ModBus read blocks:')
-        for i, block in enumerate(blocks):
-            start_addr = block[0]['address']
-            end_addr = block[-1]['address'] + block[-1].get('register_count', 1)
-            total_regs = end_addr - start_addr
-            sensor_names = [s['name'] for s in block]
-            log.info(f'  Block {i + 1}: 0x{start_addr:04X}-0x{end_addr - 1:04X} ({total_regs} regs) - {", ".join(sensor_names)}')
-
-        while True:
-            self._publish_due_snapshot()
-            log.debug('Reading EM340...')
-            data = {}
-            for block in blocks:
-                start_addr = block[0]['address']
-                end_addr = block[-1]['address'] + block[-1].get('register_count', 1)
-                total_regs = end_addr - start_addr
-
-                try:
-                    log.debug(f'Reading block: 0x{start_addr:04X} to 0x{end_addr - 1:04X} ({total_regs} registers)')
-                    values = self.em340.read_registers(start_addr, number_of_registers=total_regs)
-                    if values is None or len(values) != total_regs:
-                        raise ValueError(
-                            f'Expected {total_regs} values for block starting at {hex(start_addr)}, '
-                            f'got {len(values) if values else 0}'
-                        )
-
-                    for sensor in block:
-                        sensor_start = sensor['address'] - start_addr
-                        reg_count = sensor.get('register_count', 1)
-                        sensor_values = values[sensor_start:sensor_start + reg_count]
-
-                        if len(sensor_values) != reg_count:
-                            log.warning(f'Sensor {sensor["name"]} expected {reg_count} registers, got {len(sensor_values)}')
-                            continue
-
-                        value = None
-                        vt = sensor['value_type']
-                        if vt == 'INT16':
-                            value = sensor_values[0]
-                            if value & 0x8000:
-                                value = -0x10000 + value
-                        elif vt == 'UINT16':
-                            value = sensor_values[0]
-                        elif vt == 'INT32':
-                            if len(sensor_values) >= 2:
-                                value = sensor_values[0] + (sensor_values[1] << 16)
-                                if value & 0x80000000:
-                                    value = -0x100000000 + value
-                            else:
-                                log.error(f'INT32 sensor {sensor["name"]} needs 2 registers, got {len(sensor_values)}')
-                                continue
-                        elif vt == 'UINT32':
-                            if len(sensor_values) >= 2:
-                                value = sensor_values[0] + (sensor_values[1] << 16)
-                            else:
-                                log.error(f'UINT32 sensor {sensor["name"]} needs 2 registers, got {len(sensor_values)}')
-                                continue
-                        elif vt == 'INT64':
-                            if len(sensor_values) >= 4:
-                                value = (
-                                    sensor_values[0]
-                                    + (sensor_values[1] << 16)
-                                    + (sensor_values[2] << 32)
-                                    + (sensor_values[3] << 48)
-                                )
-                                if value & 0x8000000000000000:
-                                    value = -0x10000000000000000 + value
-                            else:
-                                log.error(f'INT64 sensor {sensor["name"]} needs 4 registers, got {len(sensor_values)}')
-                                continue
-                        elif vt == 'UINT64':
-                            if len(sensor_values) >= 4:
-                                value = (
-                                    sensor_values[0]
-                                    + (sensor_values[1] << 16)
-                                    + (sensor_values[2] << 32)
-                                    + (sensor_values[3] << 48)
-                                )
-                            else:
-                                log.error(f'UINT64 sensor {sensor["name"]} needs 4 registers, got {len(sensor_values)}')
-                                continue
-                        else:
-                            log.error(f'Unknown value_type {vt} for sensor {sensor["name"]}')
-                            continue
-
-                        value = value * float(sensor['multiply'])
-                        units = sensor.get('unit_of_measurement', '')
-                        log.debug(f'{sensor["name"]} (0x{sensor["address"]:04X}): {value} {units}')
-                        data[sensor['id']] = value
-
-                except IOError as err:
-                    log.error(f'Failed to read from ModBus device at {self.em340.serial.port}: {err}')
-                    log.warning('Attempting to reconnect to serial device...')
-                    if self._reconnect_serial_device():
-                        log.info('Successfully reconnected to serial device. Resuming operations.')
-                        continue
-                    else:
-                        log.error('Failed to reconnect to serial device. Will retry on next iteration.')
-                        break
-                except serial.SerialException as err:
-                    log.error(f'Serial communication error: {err}')
-                    log.warning('Serial exception detected. Attempting to reconnect...')
-                    if self._reconnect_serial_device():
-                        log.info('Successfully reconnected after serial exception. Resuming operations.')
-                        continue
-                    else:
-                        log.error('Failed to reconnect after serial exception. Will retry on next iteration.')
-                        break
-                except ValueError as err:
-                    log.error(f'Error reading block starting at 0x{start_addr:04X}: {err}')
-                    continue
-                except KeyError as err:
-                    log.error(f'Error in sensor definition: {err}')
-                    sys.exit(1)
-                except KeyboardInterrupt:
-                    log.info('Keyboard interrupt detected. Exiting...')
-                    if hasattr(self, 'config_manager'):
-                        self.config_manager.stop_config_service()
-                    sys.exit(0)
-                finally:
-                    time.sleep(self.t_delay_seconds)
-
-            self._add_fine_totals(data)
-
-            # Add timestamp in local time
-            data['last_seen'] = datetime.now(tz=tz.tzlocal()).isoformat()
-
-            # Publish data to MQTT
-            payload = json.dumps(data)
+    def poll_once(self, blocks) -> dict:
+        """Read every block through the bus; a block that fails is left out of this message."""
+        data = {}
+        for block in blocks:
+            start, count = block_span(block)
             try:
-                result = self.mqtt_client.publish(self.topic, payload)
-                if result.rc != mqtt.MQTT_ERR_SUCCESS:
-                    log.warning(f'MQTT publish failed with code {result.rc}')
-            except Exception as e:
-                log.error(f'Error publishing to MQTT: {e}')
+                values = self.bus.read_registers(self.modbus_address, start, count)
+                if values is None or len(values) != count:
+                    raise ValueError(f'expected {count} values, got {len(values) if values else 0}')
+            except BusUnavailable as err:
+                log.error(f'Modbus bus unavailable: {err}')     # the bus reopens the port by itself
+                break
+            except (IOError, ValueError, TimeoutError) as err:
+                log.error(f'Block 0x{start:04X} ({count} registers) not read: {err}')
+                continue
+            for sensor in block:
+                offset = sensor['address'] - start
+                try:
+                    data[sensor['id']] = decode_value(sensor, values[offset:offset + sensor.get('register_count', 1)])
+                except ValueError as err:
+                    log.error(str(err))
+        return data
 
-            # Sleep until the next polling cycle or the next quarter-hour boundary, whichever comes first
-            self._sleep_until_next_cycle()
+    def read_sensors(self):
+        """Main loop: the quarter-hour snapshot when due, the poll, publish, sleep."""
+        blocks = build_blocks(self.sensors)
+        log.info(f'Organised {sum(len(b) for b in blocks)} sensors into {len(blocks)} ModBus read blocks:')
+        for i, block in enumerate(blocks):
+            start, count = block_span(block)
+            log.info(f'  Block {i + 1}: 0x{start:04X}-0x{start + count - 1:04X} ({count} regs) - '
+                     f'{", ".join(s["name"] for s in block)}')
+
+        try:
+            while True:
+                self._publish_due_snapshot()
+                data = self.poll_once(blocks)
+                self._add_fine_totals(data)
+                data['last_seen'] = datetime.now(tz=tz.tzlocal()).isoformat()
+                try:
+                    result = self.mqtt_client.publish(self.topic, json.dumps(data))
+                    if result.rc != mqtt.MQTT_ERR_SUCCESS:
+                        log.warning(f'MQTT publish failed with code {result.rc}')
+                except Exception as e:
+                    log.error(f'Error publishing to MQTT: {e}')
+                self._sleep_until_next_cycle()
+        except KeyboardInterrupt:
+            log.info('Keyboard interrupt detected. Exiting...')
+            self.config_manager.stop_config_service()
+            self.bus.stop()
 
 
 if __name__ == '__main__':
