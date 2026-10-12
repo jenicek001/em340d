@@ -30,7 +30,7 @@ def test_the_snapshot_is_published_once_retained_at_the_boundary():
     with mock.patch("em340.wall_clock", return_value=at("2026-10-12 14:14:59")):
         d._publish_due_snapshot()
     d.mqtt_client.publish.assert_not_called()
-    with mock.patch("em340.wall_clock", return_value=at("2026-10-12 14:15:00.1")):
+    with mock.patch("em340.wall_clock", return_value=at("2026-10-12 14:15:00.100")):
         d._publish_due_snapshot()
         d._publish_due_snapshot()
     assert d.mqtt_client.publish.call_count == 1

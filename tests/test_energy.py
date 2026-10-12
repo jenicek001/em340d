@@ -95,8 +95,8 @@ def test_a_dst_change_keeps_96_or_so_boundaries_900_s_apart_on_the_quarter_hour(
 
 def test_each_boundary_is_due_once():
     s = energy.QuarterHourSnapshots(at("2026-10-12 14:14:50"))
-    assert s.due(at("2026-10-12 14:14:59.9")) is None
-    assert s.due(at("2026-10-12 14:15:00.08")) == at("2026-10-12 14:15:00")
+    assert s.due(at("2026-10-12 14:14:59.900")) is None
+    assert s.due(at("2026-10-12 14:15:00.080")) == at("2026-10-12 14:15:00")
     assert s.due(at("2026-10-12 14:15:10")) is None
     assert s.seq == 1 and s.next == at("2026-10-12 14:30:00")
 
@@ -105,7 +105,7 @@ def test_a_boundary_reached_too_late_is_skipped_and_never_published_twice():
     s = energy.QuarterHourSnapshots(at("2026-10-12 14:14:50"))
     assert s.due(at("2026-10-12 14:47:00")) is None                         # a gap: 14:15 is 32 min late
     assert s.next == at("2026-10-12 15:00:00")                              # 14:30 and 14:45 are not replayed
-    assert s.due(at("2026-10-12 15:00:00.5")) == at("2026-10-12 15:00:00")
+    assert s.due(at("2026-10-12 15:00:00.500")) == at("2026-10-12 15:00:00")
 
 
 def test_seconds_to_next_lets_the_loop_wake_at_the_boundary():
