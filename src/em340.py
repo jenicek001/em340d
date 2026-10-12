@@ -11,6 +11,7 @@ from dateutil import tz
 from logger import log
 from config_loader import load_sensors
 from em340_config_manager import EM340ConfigManager
+from energy import EnergyReader, QuarterHourSnapshots, clock_synchronized, snapshot_payload, wall_clock
 
 # Base directory of the project (parent of src/)
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -68,6 +69,16 @@ class EM340:
 
         # Initialize serial connection with retry support
         self._initialize_serial_connection()
+
+        # Energy at 1 Wh resolution and the quarter-hour snapshots (issue #6)
+        self.energy = EnergyReader(lambda: self.em340)
+        self.snapshots = QuarterHourSnapshots(wall_clock())
+        self.interval_topic = f'{self.mqtt_topic_base}/{self.serial_number}/interval'
+        synced = clock_synchronized()
+        if synced is False:
+            log.warning('The system clock is NOT synchronised (NTP): quarter-hour snapshots will be off by its error')
+        else:
+            log.info(f'Quarter-hour energy snapshots on {self.interval_topic}; clock synchronised: {synced}')
 
     def _initialize_serial_connection(self):
         """Initialize or reinitialize the serial connection to the ModBus device."""
@@ -190,6 +201,41 @@ class EM340:
         log.error(f'Failed to reconnect after {retry_count} attempts')
         return False
 
+    def _publish_due_snapshot(self):
+        """At a quarter-hour boundary: read the energy totals and publish them, retained (issue #6)."""
+        boundary = self.snapshots.due(wall_clock())
+        if boundary is None:
+            return
+        try:
+            imp, exp, resolution = self.energy.read()
+        except (IOError, ValueError, serial.SerialException) as err:
+            log.error(f'Quarter-hour snapshot not read: {err}')
+            return
+        payload = snapshot_payload(boundary, wall_clock(), imp, exp, resolution, self.serial_number, self.snapshots.seq)
+        if payload['read_delay_ms'] > 5000:
+            log.warning(f'Quarter-hour snapshot read {payload["read_delay_ms"]} ms after the boundary')
+        try:
+            result = self.mqtt_client.publish(self.interval_topic, json.dumps(payload), qos=1, retain=True)
+            if result.rc != mqtt.MQTT_ERR_SUCCESS:
+                log.warning(f'MQTT publish of the quarter-hour snapshot failed with code {result.rc}')
+        except Exception as e:
+            log.error(f'Error publishing the quarter-hour snapshot: {e}')
+
+    def _add_fine_totals(self, data: dict):
+        """The regular message's total_energy_import/export at the best resolution (same names, kWh)."""
+        try:
+            imp, exp, _ = self.energy.read()
+        except (IOError, ValueError, serial.SerialException) as err:
+            log.warning(f'Energy totals not read at 1 Wh resolution: {err}')
+            return
+        data['total_energy_import'] = imp
+        data['total_energy_export'] = exp
+
+    def _sleep_until_next_cycle(self):
+        """The polling interval, or less: wake just after the next quarter-hour boundary."""
+        to_boundary = self.snapshots.seconds_to_next(wall_clock()) + 0.01
+        time.sleep(min(self.polling_interval, to_boundary))
+
     def read_sensors(self):
         """Main polling loop: read all sensors and publish to MQTT, then sleep for polling_interval."""
         # Group contiguous registers into blocks for efficient reading
@@ -231,6 +277,7 @@ class EM340:
             log.info(f'  Block {i + 1}: 0x{start_addr:04X}-0x{end_addr - 1:04X} ({total_regs} regs) - {", ".join(sensor_names)}')
 
         while True:
+            self._publish_due_snapshot()
             log.debug('Reading EM340...')
             data = {}
             for block in blocks:
@@ -343,6 +390,8 @@ class EM340:
                 finally:
                     time.sleep(self.t_delay_seconds)
 
+            self._add_fine_totals(data)
+
             # Add timestamp in local time
             data['last_seen'] = datetime.now(tz=tz.tzlocal()).isoformat()
 
@@ -355,9 +404,8 @@ class EM340:
             except Exception as e:
                 log.error(f'Error publishing to MQTT: {e}')
 
-            # Sleep until next polling cycle
-            log.debug(f'Sleeping {self.polling_interval}s until next polling cycle...')
-            time.sleep(self.polling_interval)
+            # Sleep until the next polling cycle or the next quarter-hour boundary, whichever comes first
+            self._sleep_until_next_cycle()
 
 
 if __name__ == '__main__':
