@@ -211,6 +211,9 @@ class EM340:
         except (IOError, ValueError, serial.SerialException) as err:
             log.error(f'Quarter-hour snapshot not read: {err}')
             return
+        finally:
+            # The meter's turnaround before the poll's first block (without it: "no answer" and a reconnect)
+            time.sleep(self.t_delay_seconds)
         payload = snapshot_payload(boundary, wall_clock(), imp, exp, resolution, self.serial_number, self.snapshots.seq)
         if payload['read_delay_ms'] > 5000:
             log.warning(f'Quarter-hour snapshot read {payload["read_delay_ms"]} ms after the boundary')
