@@ -55,19 +55,24 @@ class EnergyReader:
     checked once against the 0.1 kWh registers; if they do not answer or disagree, the coarse registers are
     used from then on, with resolution_kwh 0.1."""
 
-    def __init__(self, instrument: Callable):
+    def __init__(self, instrument: Callable, delay_s: float = 0.05, sleep: Callable = time.sleep):
         self._instrument = instrument           # a getter: the instrument is replaced after a reconnect
+        self.delay_s, self._sleep = delay_s, sleep
         self.fine: Optional[bool] = None
 
+    def _read(self, address: int, count: int):
+        """One request, after the meter's turnaround pause (DELAY_MS): back-to-back requests go unanswered."""
+        self._sleep(self.delay_s)
+        return self._instrument().read_registers(address, number_of_registers=count)
+
     def _coarse(self) -> Tuple[float, float]:
-        inst = self._instrument()
-        imp = int32(*inst.read_registers(COARSE_IMPORT, number_of_registers=2)) * COARSE_WEIGHT
-        exp = int32(*inst.read_registers(COARSE_EXPORT, number_of_registers=2)) * COARSE_WEIGHT
+        imp = int32(*self._read(COARSE_IMPORT, 2)) * COARSE_WEIGHT
+        exp = int32(*self._read(COARSE_EXPORT, 2)) * COARSE_WEIGHT
         return round(imp, 1), round(exp, 1)
 
     def _check_fine(self):
         try:
-            fine = parse_fine_block(self._instrument().read_registers(FINE_START, number_of_registers=FINE_COUNT))
+            fine = parse_fine_block(self._read(FINE_START, FINE_COUNT))
         except (IOError, ValueError) as err:
             log.warning(f"3-decimal energy totalizers (0x0400) not available ({err}); using 0x0034/0x004E, 0.1 kWh")
             self.fine = False
@@ -86,7 +91,7 @@ class EnergyReader:
         if self.fine is None:
             self._check_fine()
         if self.fine:
-            imp, exp = parse_fine_block(self._instrument().read_registers(FINE_START, number_of_registers=FINE_COUNT))
+            imp, exp = parse_fine_block(self._read(FINE_START, FINE_COUNT))
             return imp, exp, FINE_RESOLUTION
         imp, exp = self._coarse()
         return imp, exp, COARSE_WEIGHT

@@ -71,7 +71,7 @@ class EM340:
         self._initialize_serial_connection()
 
         # Energy at 1 Wh resolution and the quarter-hour snapshots (issue #6)
-        self.energy = EnergyReader(lambda: self.em340)
+        self.energy = EnergyReader(lambda: self.em340, delay_s=self.t_delay_seconds)
         self.snapshots = QuarterHourSnapshots(wall_clock())
         self.interval_topic = f'{self.mqtt_topic_base}/{self.serial_number}/interval'
         synced = clock_synchronized()

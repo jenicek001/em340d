@@ -39,6 +39,7 @@ services:
       - LOG_ROTATE_COUNT=${LOG_ROTATE_COUNT:-5}
       - DELAY_MS=${DELAY_MS:-50}
       - POLLING_INTERVAL_S=${POLLING_INTERVAL_S:-10}
+      - TZ=${TZ:-Europe/Prague}       # log times, last_seen and interval_end in local time
     
     # Logging configuration with timestamps
     logging:
