@@ -27,8 +27,12 @@ class Meter:
         self.imp, self.exp, self.has_fine = imp, exp, fine
         self.coarse = coarse
         self.reads = []
+        self.clock, self.last = None, 0.0
 
     def read_registers(self, address, number_of_registers):
+        if self.reads and self.clock is not None and self.clock() - self.last < 0.049:
+            raise IOError("No communication with the instrument (no answer)")    # the real meter's turnaround
+        self.last = self.clock() if self.clock is not None else 0.0
         self.reads.append((address, number_of_registers))
         if address == energy.FINE_START:
             if not self.has_fine:
@@ -55,7 +59,7 @@ def test_a_short_block_is_an_error():
 
 def test_the_fine_totalizers_are_used_when_they_agree_with_the_coarse_registers():
     m = Meter()
-    r = energy.EnergyReader(lambda: m)
+    r = energy.EnergyReader(lambda: m, sleep=lambda s: None)
     assert r.read() == (3180.812, 15619.204, 0.001) and r.fine is True
     m.reads.clear()
     m.imp = 3180.9
@@ -64,13 +68,13 @@ def test_the_fine_totalizers_are_used_when_they_agree_with_the_coarse_registers(
 
 def test_the_coarse_registers_are_used_when_the_meter_has_no_fine_totalizers():
     m = Meter(fine=False)
-    r = energy.EnergyReader(lambda: m)
+    r = energy.EnergyReader(lambda: m, sleep=lambda s: None)
     assert r.read() == (3180.8, 15619.2, 0.1) and r.fine is False
 
 
 def test_the_coarse_registers_are_used_when_the_two_disagree():
     m = Meter(coarse=(3100.0, 15619.2))
-    r = energy.EnergyReader(lambda: m)
+    r = energy.EnergyReader(lambda: m, sleep=lambda s: None)
     assert r.read()[2] == 0.1 and r.fine is False
 
 
@@ -123,3 +127,25 @@ def test_the_snapshot_payload():
 
 def test_the_clock_check_answers_without_failing():
     assert energy.clock_synchronized() in (True, False, None)
+
+
+def test_every_request_waits_the_meters_turnaround_like_the_regular_poll():
+    # 2026-10-12 on the real EM340: three requests back to back -> "no answer" on every read
+    now = [0.0]
+    m = Meter()
+    m.clock = lambda: now[0]
+
+    def sleep(s):
+        now[0] += s
+    r = energy.EnergyReader(lambda: m, delay_s=0.05, sleep=sleep)
+    assert r.read() == (3180.812, 15619.204, 0.001)                         # check (3 requests) and read
+    assert len(m.reads) == 4
+
+
+def test_without_the_pause_the_meter_does_not_answer():
+    now = [0.0]
+    m = Meter()
+    m.clock = lambda: now[0]
+    r = energy.EnergyReader(lambda: m, delay_s=0.0, sleep=lambda s: None)
+    with pytest.raises(IOError):
+        r.read()
