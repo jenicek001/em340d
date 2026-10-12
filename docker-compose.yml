@@ -50,12 +50,13 @@ services:
         labels: "service=em340d"
     
     # Health check
+    # Healthy only while the meter answers (#12): src/health.py reads the state the main loop writes
     healthcheck:
-      test: ["CMD-SHELL", "python -c 'import minimalmodbus; print(\"OK\")'"]
+      test: ["CMD", "python", "src/health.py"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
+      start_period: 60s
     
     # Network mode - using host networking for MQTT broker connectivity
     network_mode: "host"

@@ -20,6 +20,7 @@ from dateutil import tz
 from config_loader import load_sensors
 from em340_config_manager import EM340ConfigManager
 from energy import EnergyReader, QuarterHourSnapshots, clock_synchronized, snapshot_payload, wall_clock
+import health
 from logger import log
 from modbus_bus import HIGH, BusUnavailable, ModbusBus, serial_instrument_factory
 
@@ -223,6 +224,12 @@ class EM340:
         data['total_energy_import'] = imp
         data['total_energy_export'] = exp
 
+    def _write_health(self):
+        try:
+            health.write(health.HEALTH_FILE, self.bus)
+        except OSError as err:
+            log.warning(f'Health file not written: {err}')
+
     def _sleep_until_next_cycle(self):
         """The polling interval, or less: wake just after the next quarter-hour boundary."""
         to_boundary = self.snapshots.seconds_to_next(wall_clock()) + 0.01
@@ -274,6 +281,7 @@ class EM340:
                         log.warning(f'MQTT publish failed with code {result.rc}')
                 except Exception as e:
                     log.error(f'Error publishing to MQTT: {e}')
+                self._write_health()
                 self._sleep_until_next_cycle()
         except KeyboardInterrupt:
             log.info('Keyboard interrupt detected. Exiting...')

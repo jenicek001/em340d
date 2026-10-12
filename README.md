@@ -284,6 +284,22 @@ em340/<serial>/interval
 host (chrony or systemd-timesyncd; check with `timedatectl`: "System clock synchronized: yes"). The
 daemon logs the kernel's synchronisation state at start, and warns if the clock is not synchronised.
 
+## 🚌 **One owner of the serial port: ModbusBus**
+
+Every Modbus request - the poll, the quarter-hour snapshot, the MQTT configuration service - goes through
+one `ModbusBus` (`src/modbus_bus.py`, #12):
+
+- one transaction at a time, from any thread (a single worker thread and a priority queue);
+- `DELAY_MS` of turnaround after every transaction, answered or not: the EM340 does not answer a request sent
+  sooner;
+- the quarter-hour snapshot first (priority), so it is read within the transaction in flight;
+- a read with no answer or an invalid answer is retried once; a slave exception is not; writes never are;
+- a lost USB adapter closes the port, which is reopened with a backoff (2 s doubling to 60 s); MQTT is untouched.
+
+**Health:** after every cycle the main loop writes the bus's counters to `HEALTH_FILE`
+(`/tmp/em340d.health`). The container is healthy only while the meter has answered within 60 s:
+`docker exec em340d python src/health.py`.
+
 ## 🔗 **Hardware Connection**
 
 ### EM340 to USB-RS485 Wiring

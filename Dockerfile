@@ -49,8 +49,9 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONPATH=/app/src
 
 # Health check to ensure the application can start
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import minimalmodbus, yaml; print('Dependencies OK')" || exit 1
+# Healthy only while the meter answers (#12): the main loop writes the bus's state, src/health.py checks it
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD python src/health.py || exit 1
 
 # Default command
 CMD ["python", "src/em340.py"]
