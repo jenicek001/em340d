@@ -65,3 +65,29 @@ def test_the_loop_sleeps_to_the_boundary_when_it_is_nearer_than_the_poll():
     with mock.patch("em340.wall_clock", return_value=at("2026-10-12 14:01:00")), mock.patch("em340.time.sleep") as sleep:
         d._sleep_until_next_cycle()
     assert sleep.call_args.args[0] == 10.0
+
+
+def test_the_poll_after_a_snapshot_waits_the_meters_turnaround():
+    # 2026-10-12 11:45 on the real EM340: the first block right after the snapshot got "no answer" and a reconnect
+    d, meter = daemon(at("2026-10-12 14:14:50"))
+    calls = []
+    meter.read_registers = mock.Mock(side_effect=lambda *a, **k: calls.append("read") or Meter().read_registers(*a, **k))
+    with mock.patch("em340.wall_clock", return_value=at("2026-10-12 14:15:00.100")), \
+            mock.patch("em340.time.sleep", side_effect=lambda s: calls.append(("sleep", s))), \
+            mock.patch("energy.time.sleep", side_effect=lambda s: calls.append(("sleep", s))):
+        d.energy._sleep = lambda s: calls.append(("sleep", s))
+        d._publish_due_snapshot()
+    assert calls[-1] == ("sleep", d.t_delay_seconds)                        # the last thing: the pause
+    assert d.mqtt_client.publish.call_count == 1
+
+
+def test_a_failed_snapshot_read_also_waits():
+    d, meter = daemon(at("2026-10-12 14:14:50"))
+    d.energy.fine = True
+    meter.read_registers = mock.Mock(side_effect=IOError("no answer"))
+    with mock.patch("em340.wall_clock", return_value=at("2026-10-12 14:15:00.100")), \
+            mock.patch("em340.time.sleep") as sleep:
+        d.energy._sleep = lambda s: None
+        d._publish_due_snapshot()
+    sleep.assert_called_once_with(d.t_delay_seconds)
+    d.mqtt_client.publish.assert_not_called()
