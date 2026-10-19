@@ -5,111 +5,68 @@ Listens to MQTT configuration topics and applies settings to the EM340 device
 """
 
 import json
+import os
 import time
 import paho.mqtt.client as mqtt
 from logger import log
 from typing import Dict, Any, Optional, Union
 
+def write_enabled_from_env() -> bool:
+    """em340d's own switch (its environment, never MQTT): writes into the meter are off unless CONFIG_WRITE_ENABLED
+    is true (#17)."""
+    return os.getenv('CONFIG_WRITE_ENABLED', 'false').strip().lower() in ('1', 'true', 'yes', 'on')
+
+
 class EM340ConfigManager:
     """Manages EM340 configuration via MQTT commands"""
     
-    # ModBus register definitions based on EM340 specification
+    # The EM340's configuration registers (docs/EM330_EM340_ET330_ET340_CP.pdf, CP v2 rev 17, tables 2.9-1..2.9-6;
+    # #17). The EM340 is direct-connected (input AV2): it has no CT or VT ratio. Writing goes into the meter itself.
+    # critical: changes what the billing meter measures or locks the meter - the payload must repeat the serial number.
     CONFIG_REGISTERS = {
-        # System Configuration (0x1000-0x1100 range)
         'password': {
-            'address': 0x1000,
-            'type': 'UINT16',
-            'min_value': 0,
-            'max_value': 9999,
-            'description': 'Device password (EM only)',
-            'writable': True
+            'address': 0x1000, 'type': 'UINT16', 'min_value': 0, 'max_value': 9999,
+            'description': 'Device password', 'writable': True, 'critical': True
         },
         'measuring_system': {
-            'address': 0x1002,
-            'type': 'UINT16',
-            'min_value': 0,
-            'max_value': 2,
+            'address': 0x1002, 'type': 'UINT16', 'min_value': 0, 'max_value': 2,
             'description': 'Measuring system configuration',
-            'values': {
-                0: '3-phase 4-wire with neutral',
-                1: '3-phase 3-wire without neutral', 
-                2: '2-phase 3-wire'
-            },
-            'writable': True
+            'values': {0: '3-phase 4-wire with neutral', 1: '3-phase 3-wire without neutral', 2: '2-phase 3-wire'},
+            'writable': True, 'critical': True
         },
         'display_mode': {
-            'address': 0x1101,
-            'type': 'UINT16',
-            'description': 'Display mode configuration',
-            'writable': True
+            'address': 0x1100, 'type': 'UINT16', 'min_value': 0, 'max_value': 1,
+            'description': 'Display mode', 'values': {0: 'Full', 1: 'Easy'}, 'writable': True
         },
         'tariff_enabling': {
-            'address': 0x1101,
-            'type': 'UINT16',
-            'description': 'Tariff management enabling',
-            'writable': True
+            'address': 0x1101, 'type': 'UINT16', 'min_value': 0, 'max_value': 1,
+            'description': 'Tariff management enabling', 'values': {0: 'OFF', 1: 'ON'}, 'writable': True
         },
         'home_page_selection': {
-            'address': 0x1102,
-            'type': 'UINT16',
-            'description': 'Home page selection (EM only)',
-            'writable': True
+            'address': 0x1102, 'type': 'UINT16', 'min_value': 0, 'max_value': 19,
+            'description': 'Home page selection (cannot be changed on MID models PFA/PFB)', 'writable': True
         },
         'measurement_mode': {
-            'address': 0x1103,
-            'type': 'UINT16',
-            'min_value': 0,
-            'max_value': 1,
+            'address': 0x1103, 'type': 'UINT16', 'min_value': 0, 'max_value': 1,
             'description': 'Measurement mode selection',
-            'values': {
-                0: 'Easy connection mode (A)',
-                1: 'Bidirectional mode (B)'
-            },
-            'writable': True
+            'values': {0: 'Easy connection mode (A)', 1: 'Bidirectional mode (B)'},
+            'writable': True, 'critical': True
         },
         'wrong_connection_help': {
-            'address': 0x1104,
-            'type': 'UINT16',
-            'description': 'Wrong connection installing help enabling',
+            'address': 0x1104, 'type': 'UINT16', 'min_value': 0, 'max_value': 1,
+            'description': 'Wrong connection (installing help) enabling', 'values': {0: 'ON', 1: 'OFF'}, 'writable': True
+        },
+        'tariff_mode': {
+            'address': 0x1200, 'type': 'UINT16', 'min_value': 0, 'max_value': 1,
+            'description': 'Tariff mode selection', 'values': {0: 'via digital inputs', 1: 'via serial communication'},
             'writable': True
         },
-        
-        # PT/CT Configuration (estimated addresses - need verification)
-        'pt_primary': {
-            'address': 0x1200,
-            'type': 'UINT16',
-            'min_value': 1,
-            'max_value': 65535,
-            'description': 'Potential transformer primary voltage',
-            'writable': True
+        'tariff_number': {
+            'address': 0x1201, 'type': 'UINT16', 'min_value': 1, 'max_value': 2,
+            'description': 'Tariff number selection via serial communication', 'writable': True
         },
-        'pt_secondary': {
-            'address': 0x1201,
-            'type': 'UINT16',
-            'min_value': 1,
-            'max_value': 65535,
-            'description': 'Potential transformer secondary voltage',
-            'writable': True
-        },
-        'ct_primary': {
-            'address': 0x1202,
-            'type': 'UINT16',
-            'min_value': 1,
-            'max_value': 65535,
-            'description': 'Current transformer primary current',
-            'writable': True
-        },
-        'ct_secondary': {
-            'address': 0x1203,
-            'type': 'UINT16',
-            'min_value': 1,
-            'max_value': 5,
-            'description': 'Current transformer secondary current',
-            'values': {1: '1A', 5: '5A'},
-            'writable': True
-        }
     }
-    
+
     def __init__(self, mqtt_config: Dict[str, Any], bus, modbus_address: int):
         """Initialize the configuration manager. Every Modbus request goes through `bus`, the ModbusBus
         the poll uses (#12): a command arriving on the MQTT thread during a poll waits its turn instead of
@@ -130,6 +87,8 @@ class EM340ConfigManager:
         self.base_topic = mqtt_config.get('topic', 'em340')
         self.device_id = mqtt_config.get('device_id', 'unknown')
         self.config_topic_base = f"{self.base_topic}/{self.device_id}/config"
+        self.write_enabled = bool(mqtt_config.get('write_enabled', False))
+        log.info(f"Configuration writes into the meter: {'ENABLED' if self.write_enabled else 'disabled'}")
         
         log.info(f"EM340 Config Manager initialized for device {self.device_id}")
         log.info(f"Configuration topics base: {self.config_topic_base}")
@@ -164,7 +123,7 @@ class EM340ConfigManager:
                 f"{self.config_topic_base}/+/set",           # Individual parameter set
                 f"{self.config_topic_base}/+/get",           # Individual parameter get
                 f"{self.config_topic_base}/batch/set",       # Batch configuration
-                f"{self.config_topic_base}/reset",           # Reset to defaults
+                f"{self.config_topic_base}/reset",           # answered with an error: factory reset removed (#17)
                 f"{self.config_topic_base}/backup",          # Backup current config
                 f"{self.config_topic_base}/restore"          # Restore from backup
             ]
@@ -195,80 +154,83 @@ class EM340ConfigManager:
             log.info(f"Received configuration message: {topic} = {payload}")
             
             # Parse topic structure
-            topic_parts = topic.replace(f"{self.config_topic_base}/", "").split("/")
-            
-            if len(topic_parts) >= 2:
-                parameter = topic_parts[0]
-                action = topic_parts[1]
-                
-                if action == "set":
-                    self.handle_parameter_set(parameter, payload)
-                elif action == "get":
-                    self.handle_parameter_get(parameter)
-                    
-            elif len(topic_parts) == 1:
-                action = topic_parts[0]
-                
-                if action == "batch/set":
-                    self.handle_batch_set(payload)
-                elif action == "reset":
-                    self.handle_reset()
-                elif action == "backup":
-                    self.handle_backup()
-                elif action == "restore":
-                    self.handle_restore(payload)
-                    
+            sub = topic.replace(f"{self.config_topic_base}/", "")
+            if sub == "batch/set":
+                self.handle_batch_set(payload)
+            elif sub == "backup":
+                self.handle_backup()
+            elif sub == "restore":
+                self.handle_restore(payload)
+            elif sub == "reset":
+                # Factory reset removed (#17): it wrote measurement mode A, and so stopped the export counters
+                log.error("config/reset is not supported (#17)")
+                self.publish_error("config/reset is not supported (#17)")
+            else:
+                topic_parts = sub.split("/")
+                if len(topic_parts) == 2:
+                    parameter, action = topic_parts
+                    if action == "set":
+                        self.handle_parameter_set(parameter, payload)
+                    elif action == "get":
+                        self.handle_parameter_get(parameter)
+
         except Exception as e:
             log.error(f"Error processing configuration message: {e}")
             self.publish_error(f"Error processing message: {str(e)}")
 
-    def handle_parameter_set(self, parameter: str, payload: str):
-        """Handle setting a single parameter"""
+    def handle_parameter_set(self, parameter: str, payload: str, serial: Optional[str] = None):
+        """Write one parameter into the meter (Modbus, through the bus) and read it back.
+
+        payload: a bare value ("1", "Easy") or JSON {"value": …, "serial": "…"}. A critical parameter is written only
+        when the payload - or a batch/restore that carries it (`serial`) - repeats the meter's serial number. Writes
+        are off unless em340d's environment enables them (CONFIG_WRITE_ENABLED)."""
         try:
             if parameter not in self.CONFIG_REGISTERS:
                 raise ValueError(f"Unknown parameter: {parameter}")
-                
             register_info = self.CONFIG_REGISTERS[parameter]
-            
             if not register_info.get('writable', False):
                 raise ValueError(f"Parameter {parameter} is read-only")
-            
+            if not self.write_enabled:
+                raise ValueError("writes disabled (CONFIG_WRITE_ENABLED is not set in em340d's environment)")
+
+            raw = payload.strip() if isinstance(payload, str) else payload
+            if isinstance(raw, str) and raw.startswith('{'):
+                data = json.loads(raw)
+                raw = data.get('value')
+                serial = data.get('serial', serial)
+            if register_info.get('critical') and str(serial or '').strip() != str(self.device_id):
+                raise ValueError(f"serial number confirmation required: {parameter} changes what the meter measures; "
+                                 f"send {{\"value\": …, \"serial\": \"<the meter's serial number>\"}}")
+
             # Parse and validate value
             try:
-                value = int(payload)
-            except ValueError:
-                # Try to parse as string for named values
-                if 'values' in register_info:
-                    reverse_values = {v: k for k, v in register_info['values'].items()}
-                    if payload in reverse_values:
-                        value = reverse_values[payload]
-                    else:
-                        raise ValueError(f"Invalid value '{payload}' for parameter {parameter}")
+                value = int(raw)
+            except (TypeError, ValueError):
+                reverse_values = {v: k for k, v in (register_info.get('values') or {}).items()}
+                if raw in reverse_values:
+                    value = reverse_values[raw]
                 else:
-                    raise ValueError(f"Invalid numeric value: {payload}")
-            
-            # Validate range
-            if 'min_value' in register_info and value < register_info['min_value']:
+                    raise ValueError(f"Invalid value '{raw}' for parameter {parameter}")
+            if register_info.get('min_value') is not None and value < register_info['min_value']:
                 raise ValueError(f"Value {value} below minimum {register_info['min_value']}")
-            if 'max_value' in register_info and value > register_info['max_value']:
+            if register_info.get('max_value') is not None and value > register_info['max_value']:
                 raise ValueError(f"Value {value} above maximum {register_info['max_value']}")
-                
-            # Write to ModBus register
+
+            # Write into the meter's register
             address = register_info['address']
-            log.info(f"Writing {parameter} = {value} to register 0x{address:04X}")
-            
+            log.warning(f"Writing {parameter} = {value} to EM340 register 0x{address:04X}")
             self.bus.write_register(self.modbus_address, address, value)
             time.sleep(0.1)  # Let the meter apply the setting before the read-back
-            
+
             # Verify write by reading back
             read_value = self.bus.read_register(self.modbus_address, address)
             if read_value == value:
-                log.info(f"Successfully set {parameter} = {value}")
+                log.warning(f"Set {parameter} = {value} (read back)")
                 self.publish_parameter_status(parameter, value, "success")
             else:
                 log.error(f"Verification failed: wrote {value}, read {read_value}")
                 self.publish_parameter_status(parameter, read_value, "verification_failed")
-                
+
         except Exception as e:
             log.error(f"Error setting parameter {parameter}: {e}")
             self.publish_parameter_status(parameter, None, f"error: {str(e)}")
@@ -304,9 +266,10 @@ class EM340ConfigManager:
             
             log.info(f"Processing batch configuration: {len(config_data)} parameters")
             
+            serial = config_data.pop('serial', None)
             for parameter, value in config_data.items():
                 try:
-                    self.handle_parameter_set(parameter, str(value))
+                    self.handle_parameter_set(parameter, str(value), serial=serial)
                     results[parameter] = "success"
                 except Exception as e:
                     results[parameter] = f"error: {str(e)}"
@@ -369,7 +332,8 @@ class EM340ConfigManager:
                 
             restored = 0
             errors = 0
-            
+            serial = backup_data.pop('serial', None)       # critical parameters only with the serial number
+
             for parameter, data in backup_data.items():
                 if parameter.startswith('_'):
                     continue  # Skip metadata
@@ -380,7 +344,7 @@ class EM340ConfigManager:
                     
                 try:
                     value = data['value']
-                    self.handle_parameter_set(parameter, str(value))
+                    self.handle_parameter_set(parameter, str(value), serial=serial)
                     restored += 1
                 except Exception as e:
                     log.error(f"Error restoring parameter {parameter}: {e}")
@@ -396,35 +360,6 @@ class EM340ConfigManager:
             log.error(f"Error in restore: {e}")
             self.publish_error(f"Restore error: {str(e)}")
 
-    def handle_reset(self):
-        """Reset configuration to factory defaults"""
-        try:
-            # Define factory defaults (based on typical EM340 settings)
-            factory_defaults = {
-                'measuring_system': 0,      # 3-phase 4-wire with neutral
-                'measurement_mode': 0,      # Easy connection mode (A)
-                'pt_primary': 400,          # 400V primary
-                'pt_secondary': 400,        # 400V secondary (1:1)
-                'ct_primary': 5,            # 5A primary
-                'ct_secondary': 5           # 5A secondary (1:1)
-            }
-            
-            reset_count = 0
-            for parameter, default_value in factory_defaults.items():
-                if parameter in self.CONFIG_REGISTERS:
-                    try:
-                        self.handle_parameter_set(parameter, str(default_value))
-                        reset_count += 1
-                    except Exception as e:
-                        log.error(f"Error resetting parameter {parameter}: {e}")
-            
-            log.info(f"Factory reset completed: {reset_count} parameters reset")
-            self.publish_status(f"Factory reset completed: {reset_count} parameters reset")
-            
-        except Exception as e:
-            log.error(f"Error in factory reset: {e}")
-            self.publish_error(f"Factory reset error: {str(e)}")
-
     def publish_available_parameters(self):
         """Publish list of available configuration parameters"""
         try:
@@ -438,7 +373,8 @@ class EM340ConfigManager:
                     'writable': info.get('writable', False),
                     'min_value': info.get('min_value'),
                     'max_value': info.get('max_value'),
-                    'values': info.get('values')
+                    'values': info.get('values'),
+                    'critical': bool(info.get('critical', False))
                 }
             
             topic = f"{self.config_topic_base}/available"
