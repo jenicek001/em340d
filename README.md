@@ -398,39 +398,27 @@ Example: `em340/235411W`
 }
 ```
 
-### Remote Configuration via MQTT 🆕
-The application also supports remote configuration of EM340 parameters via MQTT:
+### Remote Configuration via MQTT
+em340d can read and change the EM340's own settings over MQTT. **A change is a Modbus write into the meter**, so writes are protected (#17):
+- **Off by default:** enabled only in em340d's environment, `CONFIG_WRITE_ENABLED=true`, never over MQTT.
+- **The critical parameters** (`measuring_system`, `measurement_mode`, `password`) need the meter's serial number repeated in the payload.
 
-**Configuration Topics:**
-- `{MQTT_TOPIC}/{DEVICE_ID}/config/{parameter}/set` - Set parameter value
-- `{MQTT_TOPIC}/{DEVICE_ID}/config/{parameter}/get` - Get parameter value  
-- `{MQTT_TOPIC}/{DEVICE_ID}/config/batch/set` - Batch configuration
-- `{MQTT_TOPIC}/{DEVICE_ID}/config/backup` - Create configuration backup
-- `{MQTT_TOPIC}/{DEVICE_ID}/config/restore` - Restore configuration
-
-**Example Configuration Commands:**
 ```bash
-# Set measurement mode to bidirectional (B)
-mosquitto_pub -h localhost -t "em340/235411W/config/measurement_mode/set" -m "1"
+# read a setting
+mosquitto_pub -h localhost -t "em340/036245X/config/measuring_system/get" -m ""
 
-# Set measuring system to 3-phase without neutral  
-mosquitto_pub -h localhost -t "em340/235411W/config/measuring_system/set" -m "1"
+# a non-critical setting: a plain value
+mosquitto_pub -h localhost -t "em340/036245X/config/display_mode/set" -m "1"
 
-# Batch configuration
-mosquitto_pub -h localhost -t "em340/235411W/config/batch/set" -m '{
-  "measurement_mode": 0,
-  "measuring_system": 0,
-  "pt_primary": 400
-}'
+# a critical setting: repeat the serial number
+mosquitto_pub -h localhost -t "em340/036245X/config/measurement_mode/set" -m '{"value": 1, "serial": "036245X"}'
 ```
 
-**Supported Parameters:**
-- `measuring_system` (0=3P+N, 1=3P, 2=2P+N) - Electrical connection type
-- `measurement_mode` (0=Easy/A, 1=Bidirectional/B) - Energy measurement mode
-- `pt_primary`/`pt_secondary` - Potential transformer ratios
-- `ct_primary`/`ct_secondary` - Current transformer ratios
+**Parameters:**
+- `password` (0x1000), `measuring_system` (0x1002), `display_mode` (0x1100), `tariff_enabling` (0x1101), `home_page_selection` (0x1102), `measurement_mode` (0x1103), `wrong_connection_help` (0x1104), `tariff_mode` (0x1200), `tariff_number` (0x1201).
+- The EM340 is direct-connected: it has no CT or VT ratio.
 
-For complete configuration documentation, see **[MQTT_CONFIGURATION.md](MQTT_CONFIGURATION.md)**.
+For complete configuration documentation, see **[docs/MQTT_CONFIGURATION.md](docs/MQTT_CONFIGURATION.md)**.
 
 ## 🛠️ **Troubleshooting**
 

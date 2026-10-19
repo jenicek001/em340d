@@ -17,7 +17,7 @@ def setup():
     bus.start()
     with mock.patch("paho.mqtt.client.Client"):
         from em340_config_manager import EM340ConfigManager
-        cm = EM340ConfigManager({"topic": "em340", "device_id": "036245X"}, bus, 1)
+        cm = EM340ConfigManager({"topic": "em340", "device_id": "036245X", "write_enabled": True}, bus, 1)
     cm.config_mqtt_client = mock.MagicMock()
     yield sim, bus, cm
     bus.stop()
@@ -36,7 +36,7 @@ def test_get_reads_through_the_bus(setup):
 
 def test_set_writes_and_verifies_through_the_bus(setup):
     sim, bus, cm = setup
-    cm.handle_parameter_set("measurement_mode", "0")
+    cm.handle_parameter_set("measurement_mode", '{"value": 0, "serial": "036245X"}')       # critical: serial (#17)
     assert sim.registers[1][0x1103] == 0
     assert [e[1] for e in sim.log[-2:]] == ["write", "read"]
     assert any('"success"' in p for _, p in published(cm))
@@ -52,7 +52,7 @@ def test_a_set_during_a_busy_poll_never_overlaps_it(setup):
     t = threading.Thread(target=poll)
     t.start()
     for v in ("0", "1", "0"):                    # (patching time.sleep would also stop the bus's own wait)
-        cm.handle_parameter_set("measurement_mode", v)
+        cm.handle_parameter_set("measurement_mode", '{"value": %s, "serial": "036245X"}' % v)
     stop.set()
     t.join(5)
     assert sim.overlaps == 0 and sim.turnaround_violations == 0

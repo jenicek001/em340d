@@ -18,7 +18,7 @@ import serial
 from dateutil import tz
 
 from config_loader import load_sensors
-from em340_config_manager import EM340ConfigManager
+from em340_config_manager import EM340ConfigManager, write_enabled_from_env
 from energy import EnergyReader, QuarterHourSnapshots, clock_synchronized, snapshot_payload, wall_clock
 import health
 from logger import log
@@ -171,6 +171,7 @@ class EM340:
             'password': self.mqtt_password,
             'topic': self.mqtt_topic_base,
             'device_id': self.serial_number,
+            'write_enabled': write_enabled_from_env(),   # em340d's own switch, never MQTT (#17)
         }
 
         self.config_manager = EM340ConfigManager(config_mqtt_config, self.bus, self.modbus_address)
