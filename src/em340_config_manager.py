@@ -178,12 +178,13 @@ class EM340ConfigManager:
             log.error(f"Error processing configuration message: {e}")
             self.publish_error(f"Error processing message: {str(e)}")
 
-    def handle_parameter_set(self, parameter: str, payload: str, serial: Optional[str] = None):
+    def handle_parameter_set(self, parameter: str, payload: str, serial: Optional[str] = None) -> str:
         """Write one parameter into the meter (Modbus, through the bus) and read it back.
 
         payload: a bare value ("1", "Easy") or JSON {"value": …, "serial": "…"}. A critical parameter is written only
         when the payload - or a batch/restore that carries it (`serial`) - repeats the meter's serial number. Writes
-        are off unless em340d's environment enables them (CONFIG_WRITE_ENABLED)."""
+        are off unless em340d's environment enables them (CONFIG_WRITE_ENABLED). Returns the published status, which
+        batch and restore report per parameter."""
         try:
             if parameter not in self.CONFIG_REGISTERS:
                 raise ValueError(f"Unknown parameter: {parameter}")
@@ -227,13 +228,15 @@ class EM340ConfigManager:
             if read_value == value:
                 log.warning(f"Set {parameter} = {value} (read back)")
                 self.publish_parameter_status(parameter, value, "success")
-            else:
-                log.error(f"Verification failed: wrote {value}, read {read_value}")
-                self.publish_parameter_status(parameter, read_value, "verification_failed")
+                return "success"
+            log.error(f"Verification failed: wrote {value}, read {read_value}")
+            self.publish_parameter_status(parameter, read_value, "verification_failed")
+            return "verification_failed"
 
         except Exception as e:
             log.error(f"Error setting parameter {parameter}: {e}")
             self.publish_parameter_status(parameter, None, f"error: {str(e)}")
+            return f"error: {str(e)}"
 
     def handle_parameter_get(self, parameter: str):
         """Handle getting a single parameter"""
@@ -268,12 +271,7 @@ class EM340ConfigManager:
             
             serial = config_data.pop('serial', None)
             for parameter, value in config_data.items():
-                try:
-                    self.handle_parameter_set(parameter, str(value), serial=serial)
-                    results[parameter] = "success"
-                except Exception as e:
-                    results[parameter] = f"error: {str(e)}"
-                    log.error(f"Batch set error for {parameter}: {e}")
+                results[parameter] = self.handle_parameter_set(parameter, str(value), serial=serial)
                     
             # Publish batch results
             self.publish_batch_result(results)
@@ -342,12 +340,10 @@ class EM340ConfigManager:
                     log.warning(f"Skipping parameter {parameter}: backup contains error")
                     continue
                     
-                try:
-                    value = data['value']
-                    self.handle_parameter_set(parameter, str(value), serial=serial)
+                status = self.handle_parameter_set(parameter, str(data.get('value')), serial=serial)
+                if status == "success":
                     restored += 1
-                except Exception as e:
-                    log.error(f"Error restoring parameter {parameter}: {e}")
+                else:
                     errors += 1
             
             log.info(f"Restore completed: {restored} parameters restored, {errors} errors")

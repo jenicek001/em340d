@@ -127,3 +127,34 @@ def test_factory_reset_is_gone(em):
     msg = mock.MagicMock(topic="em340/036245X/config/reset", payload=b"")
     cm.on_config_mqtt_message(None, None, msg)
     assert writes(sim) == []                                            # it would have set measurement mode A
+
+
+def batch_results(cm):
+    return [json.loads(c.args[1])["results"] for c in cm.config_mqtt_client.publish.call_args_list
+            if c.args[0].endswith("/batch/result")]
+
+
+def test_batch_result_reports_each_parameter_s_real_outcome(em):
+    """Found on the live meter 2026-10-19: batch/result said "success" for parameters that were refused."""
+    sim, bus, cm = em
+    cm.handle_batch_set(json.dumps({"display_mode": 1, "measurement_mode": 0}))
+    result = batch_results(cm)[-1]
+    assert result["display_mode"] == "success"
+    assert result["measurement_mode"].startswith("error: serial number confirmation required")
+
+
+def test_batch_result_with_writes_disabled_is_an_error_for_every_parameter():
+    sim, bus, cm = manager(write_enabled=False)
+    try:
+        cm.handle_batch_set(json.dumps({"display_mode": 0, "measuring_system": 0}))
+        assert all(r.startswith("error: writes disabled") for r in batch_results(cm)[-1].values())
+    finally:
+        bus.stop()
+
+
+def test_restore_counts_refused_parameters_as_errors(em):
+    sim, bus, cm = em
+    cm.handle_restore(json.dumps({"display_mode": {"value": 1}, "measurement_mode": {"value": 0},
+                                  "_metadata": {"device_id": SERIAL}}))
+    assert any("1 restored, 1 errors" in json.loads(c.args[1]).get("message", "")
+               for c in cm.config_mqtt_client.publish.call_args_list if c.args[0].endswith("/config/status"))
