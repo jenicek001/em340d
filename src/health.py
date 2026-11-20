@@ -16,10 +16,10 @@ MAX_FILE_AGE_S = 60.0          # the loop writes it every POLLING_INTERVAL_S (10
 MAX_SUCCESS_AGE_S = 60.0       # the meter answered within this
 
 
-def write(path, bus, now=None):
-    """Atomically: the bus's stats, the age of its last success, the time written."""
+def write(path, bus, now=None, extra=None):
+    """Atomically: the bus's stats, the age of its last success, the time written, and `extra` (the fault)."""
     status = {'ts': now if now is not None else time.time(), 'last_success_age_s': bus.last_success_age(),
-              **bus.stats()}
+              **bus.stats(), **(extra or {})}
     tmp = f'{path}.tmp'
     with open(tmp, 'w') as f:
         json.dump(status, f)
@@ -40,7 +40,8 @@ def check(path, now=None):
     if age is None:
         return False, 'the meter has not answered since the start'
     if age > MAX_SUCCESS_AGE_S:
-        return False, f'the meter last answered {age:.0f} s ago (port open: {status.get("port_open")})'
+        return False, (f'the meter last answered {age:.0f} s ago (port open: {status.get("port_open")}, '
+                       f'fault: {status.get("fault")})')
     return True, f'ok: last answer {age:.1f} s ago, {status.get("ok")} ok, {status.get("retries")} retries'
 
 
