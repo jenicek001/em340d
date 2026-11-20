@@ -39,3 +39,25 @@ def discovery_messages(prefix: str, state_topic: str, status_topic: str, serial:
            "stat_cla": "measurement", "avty_t": status_topic, "pl_avail": ONLINE, "pl_not_avail": OFFLINE,
            "dev": {"ids": [uid], "name": f"EM340 {serial}", "mf": "Carlo Gavazzi", "mdl": "EM340"}}
     return [(f"{prefix}/sensor/{uid}/active_power_sys/config", json.dumps(cfg))]
+
+
+# Why the meter is offline (owner 2026-11-20): the adapter, or what is behind it. Most specific first.
+FAULTS = {
+    "adapter": "the USB-RS485 adapter is missing or its serial port failed (unplugged, USB cable, USB power, driver)",
+    "invalid": "answers arrive garbled (CRC, framing): RS485 wiring, polarity, termination, baud rate, interference",
+    "meter_error": "the meter answers but refuses the request (Modbus exception): address map, firmware",
+    "no_answer": "the adapter works but nothing answers on the RS485 bus: the meter's power or address, the RS485 "
+                 "cable, or an adapter that hangs",
+}
+_ORDER = ("adapter", "invalid", "meter_error", "no_answer")
+
+
+def diagnose(got_readings: bool, errors, port_exists: bool) -> Optional[str]:
+    """The fault of one poll: None when it read anything. A read that only timed out while the device file is gone
+    is the adapter too (an unplugged adapter does not always raise a port error first)."""
+    if got_readings:
+        return None
+    if not port_exists:
+        return "adapter"
+    found = set(errors or ())
+    return next((f for f in _ORDER if f in found), "no_answer")

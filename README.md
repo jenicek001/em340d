@@ -10,6 +10,20 @@ The meter's own status is retained on `{MQTT_TOPIC}/{DEVICE_SERIAL_NUMBER}/statu
 discovery (`HA_DISCOVERY_PREFIX`, default `homeassistant`; empty turns it off) with that status, so a monitor that
 reads discovery (Home Assistant, the SmartHomeDesign EMS edge) finds it with nothing to configure.
 
+Why the meter is offline is retained on `{MQTT_TOPIC}/{DEVICE_SERIAL_NUMBER}/fault` (JSON `fault`, `detail`, `port`,
+`since`; `fault` is null while the meter answers), also in the log and the health file:
+
+| `fault` | Meaning | What to check |
+|---|---|---|
+| `adapter` | the USB-RS485 adapter is missing or its serial port failed | the adapter is plugged in, its USB cable and power; `SERIAL_DEVICE` |
+| `no_answer` | the adapter works, nothing answers on the RS485 bus | the meter's power and Modbus address, the RS485 cable (A/B), an adapter that hangs (re-plug it) |
+| `invalid` | answers arrive garbled (CRC, framing) | RS485 polarity, termination, baud rate, interference |
+| `meter_error` | the meter refuses the request (Modbus exception) | the register map, the meter's firmware |
+
+An unplugged adapter is reopened by its path every 2 s, backing off to 60 s; data resumes by itself when it is back.
+Use the stable `/dev/serial/by-id/...` path for `SERIAL_DEVICE`: a re-plugged adapter can come back as another
+`/dev/ttyUSBn`, and em340d would then wait for the old name for ever.
+
 Example: `em340/235411W`
 
 ```json

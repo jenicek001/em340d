@@ -19,6 +19,7 @@ class SimBus:
         self.registers = {}                  # slave -> {address: value}
         self.faults = []                     # queued: "no_answer", "invalid", "port_lost", "illegal"
         self.port_ok = True
+        self.meter_silent = False            # the adapter works, nothing answers on the RS485 bus
         self.opened = 0
         self.log = []                        # (slave, op, address, count, start, end, outcome)
         self.overlaps = 0
@@ -46,6 +47,9 @@ class SimBus:
             if not self.port_ok:
                 outcome = "port_lost"
                 raise serial.SerialException("device reports readiness to read but returned no data")
+            if self.meter_silent:
+                outcome = "no_answer"
+                raise minimalmodbus.NoResponseError("No communication with the instrument (no answer)")
             if self._last_end is not None and start - self._last_end < self.turnaround_s:
                 self.turnaround_violations += 1
                 outcome = "turnaround"
