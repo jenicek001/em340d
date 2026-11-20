@@ -20,6 +20,7 @@ from dateutil import tz
 from config_loader import load_sensors
 from em340_config_manager import EM340ConfigManager, write_enabled_from_env
 from energy import EnergyReader, QuarterHourSnapshots, clock_synchronized, snapshot_payload, wall_clock
+from status import OFFLINE, StatusTracker, discovery_messages
 import health
 from logger import log
 from modbus_bus import HIGH, BusUnavailable, ModbusBus, serial_instrument_factory
@@ -112,6 +113,8 @@ class EM340:
         self.mqtt_username = os.getenv('MQTT_USERNAME', '')
         self.mqtt_password = os.getenv('MQTT_PASSWORD', '')
         self.mqtt_topic_base = os.getenv('MQTT_TOPIC', 'em340')
+        self.ha_discovery_prefix = os.getenv('HA_DISCOVERY_PREFIX', 'homeassistant')   # empty: no discovery
+        self.status = StatusTracker()
 
         log.info(
             f'ModBus configuration: device={self.device}, address={self.modbus_address}, '
@@ -154,7 +157,10 @@ class EM340:
         self.mqtt_client.on_disconnect = self.on_mqtt_disconnect
         self.mqtt_client.reconnect_delay_set(min_delay=2, max_delay=30)
         self.topic = f'{self.mqtt_topic_base}/{self.serial_number}'
-        log.info(f'MQTT topic configured: {self.topic}')
+        self.status_topic = f'{self.topic}/status'
+        # em340d gone (crash, power, network): the broker sets the meter offline
+        self.mqtt_client.will_set(self.status_topic, OFFLINE, qos=1, retain=True)
+        log.info(f'MQTT topic configured: {self.topic} (status {self.status_topic})')
         self.mqtt_client.loop_start()
         try:
             self.mqtt_client.connect(self.mqtt_broker, self.mqtt_port)
@@ -184,6 +190,11 @@ class EM340:
     def on_mqtt_connect(self, client, userdata, flags, reason_code, properties=None):
         if reason_code == 0:
             log.info('Connected to MQTT broker.')
+            for topic, payload in discovery_messages(self.ha_discovery_prefix, self.topic, self.status_topic,
+                                                     self.serial_number):
+                client.publish(topic, payload, qos=1, retain=True)
+            if self.status.current is not None:          # the last verdict again (the will may have replaced it)
+                client.publish(self.status_topic, self.status.current, qos=1, retain=True)
         else:
             log.error(f'Failed to connect to MQTT broker, return code {reason_code}')
 
@@ -224,6 +235,16 @@ class EM340:
             return
         data['total_energy_import'] = imp
         data['total_energy_export'] = exp
+
+    def _publish_status(self, got_readings: bool):
+        """The meter's own status, retained: online while it answers, offline after a few polls without a reading."""
+        new = self.status.update(got_readings)
+        if new is not None:
+            (log.warning if new == OFFLINE else log.info)(f'Meter {new}')
+            try:
+                self.mqtt_client.publish(self.status_topic, new, qos=1, retain=True)
+            except Exception as e:
+                log.error(f'Error publishing the status: {e}')
 
     def _write_health(self):
         try:
@@ -274,6 +295,7 @@ class EM340:
             while True:
                 self._publish_due_snapshot()
                 data = self.poll_once(blocks)
+                self._publish_status(bool(data))
                 self._add_fine_totals(data)
                 data['last_seen'] = datetime.now(tz=tz.tzlocal()).isoformat()
                 try:
@@ -286,6 +308,7 @@ class EM340:
                 self._sleep_until_next_cycle()
         except KeyboardInterrupt:
             log.info('Keyboard interrupt detected. Exiting...')
+            self.mqtt_client.publish(self.status_topic, OFFLINE, qos=1, retain=True)
             self.config_manager.stop_config_service()
             self.bus.stop()
 

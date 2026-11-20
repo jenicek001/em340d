@@ -4,6 +4,12 @@ A robust daemon that reads data from Carlo Gavazzi EM340 Smart Meters via RS485/
 
 Data is published to: `{MQTT_TOPIC}/{DEVICE_SERIAL_NUMBER}`
 
+The meter's own status is retained on `{MQTT_TOPIC}/{DEVICE_SERIAL_NUMBER}/status`: `online` while the meter answers,
+`offline` after 3 polls in a row without a single reading (a broken RS485 cable or adapter, a dead meter), and
+`offline` as em340d's MQTT last will when em340d itself is gone. The meter is announced by Home Assistant MQTT
+discovery (`HA_DISCOVERY_PREFIX`, default `homeassistant`; empty turns it off) with that status, so a monitor that
+reads discovery (Home Assistant, the SmartHomeDesign EMS edge) finds it with nothing to configure.
+
 Example: `em340/235411W`
 
 ```json
