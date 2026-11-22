@@ -14,7 +14,9 @@ ModbusBus. It guarantees what each caller used to have to remember itself:
   retried;
 - **port failure:** a SerialException or OSError closes the port; it is reopened - the port only - with a
   backoff (2 s doubling to 60 s), and requests fail fast with BusUnavailable meanwhile;
-- **stats and health:** counters and the age of the last success.
+- **stats and health:** counters and the age of the last success;
+- **an action with the port closed** (`reopen`, `with_port_closed`): between two transactions, for the self-recovery
+  of a silent bus (recovery.py).
 
     bus = ModbusBus("/dev/ttyUSB0", turnaround_s=0.05)
     bus.start()
@@ -132,6 +134,21 @@ class ModbusBus:
         return self._wait(self.submit(lambda inst: inst.write_register(address, value, functioncode=functioncode),
                                       slave, priority, "write"), timeout)
 
+    def with_port_closed(self, fn: Optional[Callable[[], Any]] = None, reopen_in_s: float = 0.0,
+                         timeout: Optional[float] = None):
+        """Between two transactions: close the port, run fn() (a USB reset), and let the next request reopen it
+        after `reopen_in_s` (the time a reset adapter needs to come back). fn's result, or its exception."""
+        def action(_inst):
+            self._close_port()
+            self._port_down_until = self.clock() + reopen_in_s
+            self._backoff = self._backoff_min
+            return fn() if fn is not None else None
+        return self._wait(self.submit(action, 0, HIGH, "port"), timeout)
+
+    def reopen(self):
+        """Close the port; the next request opens it afresh."""
+        self.with_port_closed()
+
     def _wait(self, future: Future, timeout: Optional[float]):
         import concurrent.futures
         try:
@@ -163,6 +180,8 @@ class ModbusBus:
                 req.future.set_exception(exc)
 
     def _execute(self, req: _Request):
+        if req.kind == "port":
+            return req.fn(None)
         attempts = 2 if req.kind == "read" else 1
         for attempt in range(attempts):
             inst = self._instrument(req.slave)

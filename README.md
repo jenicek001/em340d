@@ -11,7 +11,7 @@ discovery (`HA_DISCOVERY_PREFIX`, default `homeassistant`; empty turns it off) w
 reads discovery (Home Assistant, the SmartHomeDesign EMS edge) finds it with nothing to configure.
 
 Why the meter is offline is retained on `{MQTT_TOPIC}/{DEVICE_SERIAL_NUMBER}/fault` (JSON `fault`, `detail`, `port`,
-`since`; `fault` is null while the meter answers), also in the log and the health file:
+`since`, `recovery`, `recovered_by`; `fault` is null while the meter answers), also in the log and the health file:
 
 | `fault` | Meaning | What to check |
 |---|---|---|
@@ -23,6 +23,15 @@ Why the meter is offline is retained on `{MQTT_TOPIC}/{DEVICE_SERIAL_NUMBER}/fau
 An unplugged adapter is reopened by its path every 2 s, backing off to 60 s; data resumes by itself when it is back.
 Use the stable `/dev/serial/by-id/...` path for `SERIAL_DEVICE`: a re-plugged adapter can come back as another
 `/dev/ttyUSBn`, and em340d would then wait for the old name for ever.
+
+**Self-recovery.** While the meter is offline with `no_answer`, or with `adapter` while the device file is still
+there, em340d reopens the serial port after 1 minute, and after 3 minutes resets the adapter on the USB bus (the
+kernel's USB reset, the same as re-plugging it), again every hour while it stays silent. A hung adapter (2026-11-19:
+hours of silence that only a reboot ended) comes back by itself; a meter without power or a cut RS485 cable does not,
+and the hourly reset does no harm. `recovery` on the fault topic is the last step taken (`reopen`, `usb_reset`,
+`usb_reset_failed`); when the meter answers again `recovered_by` names the step that cured it (null: it came back by
+itself), which tells a hung adapter from a meter that was off. The reset needs the container privileged with `/dev`
+mounted, as in `docker-compose.yml`; without it the step fails, is logged, and is tried again an hour later.
 
 Example: `em340/235411W`
 

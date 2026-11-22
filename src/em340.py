@@ -23,7 +23,9 @@ from energy import EnergyReader, QuarterHourSnapshots, clock_synchronized, snaps
 import minimalmodbus
 from status import FAULTS, OFFLINE, StatusTracker, diagnose, discovery_messages
 import health
+import usb_reset
 from logger import log
+from recovery import Recovery
 from modbus_bus import HIGH, BusUnavailable, ModbusBus, serial_instrument_factory
 
 # Base directory of the project (parent of src/)
@@ -127,6 +129,7 @@ class EM340:
         self.status = StatusTracker()
         self.last_poll_errors = []                 # the kinds of error of the last poll (status.FAULTS)
         self.fault_shown = 'unset'                 # the fault last published on <topic>/fault
+        self.fault_since = None
 
         log.info(
             f'ModBus configuration: device={self.device}, address={self.modbus_address}, '
@@ -146,6 +149,8 @@ class EM340:
         self.bus = ModbusBus(self.device, turnaround_s=self.t_delay_seconds,
                              instrument_factory=serial_instrument_factory(timeout_s=0.5))
         self.bus.start()
+        # A silent bus: reopen the port, then reset the adapter on the USB bus (recovery.py)
+        self.recovery = Recovery(reopen=self.bus.reopen, usb_reset=self._reset_adapter)
 
         self._initialize_mqtt()
         self._initialize_config_manager()
@@ -259,15 +264,24 @@ class EM340:
             self._publish(self.status_topic, new)
         if self.status.current is None:
             return
-        fault = diagnose(got_readings, self.last_poll_errors, self._port_exists()) \
+        port_exists = self._port_exists()
+        fault = diagnose(got_readings, self.last_poll_errors, port_exists) \
             if self.status.current == OFFLINE else None
-        if fault != self.fault_shown:
+        step = self.recovery.update(fault, port_exists)
+        if fault != self.fault_shown or step is not None:
+            if fault != self.fault_shown:
+                self.fault_since = datetime.now(tz=tz.tzlocal()).isoformat()
+                if fault:
+                    log.warning(f'Meter offline - {fault}: {FAULTS[fault]} (port {self.device})')
             self.fault_shown = fault
-            if fault:
-                log.warning(f'Meter offline - {fault}: {FAULTS[fault]} (port {self.device})')
             self._publish(self.fault_topic, json.dumps({
-                'fault': fault, 'detail': FAULTS.get(fault), 'port': self.device,
-                'since': datetime.now(tz=tz.tzlocal()).isoformat()}))
+                'fault': fault, 'detail': FAULTS.get(fault), 'port': self.device, 'since': self.fault_since,
+                'recovery': self.recovery.last_action, 'recovered_by': self.recovery.recovered_by}))
+
+    def _reset_adapter(self):
+        """Reset the USB-RS485 adapter with the port closed; reopened once it is back (a few seconds)."""
+        node = self.bus.with_port_closed(lambda: usb_reset.reset(self.device), reopen_in_s=5.0)
+        log.warning(f'USB-RS485 adapter reset ({node})')
 
     def _publish(self, topic, payload):
         try:
@@ -278,7 +292,8 @@ class EM340:
     def _write_health(self):
         try:
             health.write(health.HEALTH_FILE, self.bus,
-                         extra={'fault': None if self.fault_shown == 'unset' else self.fault_shown})
+                         extra={'fault': None if self.fault_shown == 'unset' else self.fault_shown,
+                                'recovery': dict(self.recovery.counts, recovered_by=self.recovery.recovered_by)})
         except OSError as err:
             log.warning(f'Health file not written: {err}')
 
