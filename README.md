@@ -31,7 +31,10 @@ hours of silence that only a reboot ended) comes back by itself; a meter without
 and the hourly reset does no harm. `recovery` on the fault topic is the last step taken (`reopen`, `usb_reset`,
 `usb_reset_failed`); when the meter answers again `recovered_by` names the step that cured it (null: it came back by
 itself), which tells a hung adapter from a meter that was off. The reset needs the container privileged with `/dev`
-mounted, as in `docker-compose.yml`; without it the step fails, is logged, and is tried again an hour later.
+mounted, as in `docker-compose.yml`, and the adapter's USB device writable by the `dialout` group, which em340d's
+user belongs to. Install the udev rule for that once per host: `tools/install-usb-reset-rule.sh` (it covers the
+CH340, FTDI, CP210x and PL2303 chips). Without it the step fails with "Permission denied", is logged, and is tried
+again an hour later; reading the meter is not affected.
 
 Example: `em340/235411W`
 

@@ -1,0 +1,5 @@
+# em340d self-recovery (README, Self-recovery): let the dialout group reset the USB-RS485 adapter, as it already
+# opens its serial port. The container user is in dialout (GID 20 on Debian, Raspberry Pi OS, Armbian, Ubuntu).
+# Matches the USB devices of the common USB-serial chips: WCH CH340/CH341 (1a86), FTDI (0403), Silicon Labs CP210x
+# (10c4), Prolific PL2303 (067b). Another chip: add its idVendor (lsusb).
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="1a86|0403|10c4|067b", GROUP="dialout", MODE="0664"
