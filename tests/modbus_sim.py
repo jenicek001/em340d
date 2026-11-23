@@ -11,6 +11,7 @@ import time
 
 import minimalmodbus
 import serial
+import termios
 
 
 class SimBus:
@@ -66,6 +67,9 @@ class SimBus:
                 if fault == "port_lost":
                     self.port_ok = False
                     raise serial.SerialException("device disconnected")
+                if fault == "port_vanished":         # reset or unplugged mid-read: pyserial's tcflush on a dead fd
+                    self.port_ok = False                 # (2026-11-23, a real CH340 on a USB reset)
+                    raise termios.error(5, "Input/output error")
             time.sleep(self.transaction_s)
             return fn(self.registers.setdefault(slave, {}))
         finally:

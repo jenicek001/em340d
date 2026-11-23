@@ -126,6 +126,18 @@ def test_a_lost_port_is_reopened_with_backoff_and_requests_fail_fast_meanwhile(b
     assert bus.stats()["reopens"] >= 1 and bus.stats()["port_errors"] >= 1
 
 
+def test_a_port_that_vanishes_mid_read_is_a_port_failure_not_a_crash(bus, sim):
+    """2026-11-23: a USB reset of the real adapter made pyserial raise termios.error (EIO), which is no OSError;
+    it reached the main loop and ended em340d (Docker restarted it)."""
+    sim.faults = ["port_vanished"]
+    with pytest.raises(BusUnavailable):
+        bus.read_registers(1, 0x0400, 1)
+    sim.port_ok = True
+    time.sleep(0.25)
+    assert bus.read_registers(1, 0x0400, 1) == [3180]
+    assert bus.stats()["port_errors"] >= 1
+
+
 def test_the_caller_can_give_up_waiting(bus, sim):
     gate = threading.Event()
     bus.submit(lambda inst: gate.wait(1), slave=1)
