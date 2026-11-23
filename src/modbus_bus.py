@@ -12,7 +12,7 @@ ModbusBus. It guarantees what each caller used to have to remember itself:
 - **retries by kind:** a read with no answer or an invalid answer (CRC, framing) is retried once, after the
   turnaround; an exception the slave reports is returned at once; a write or a custom request is never
   retried;
-- **port failure:** a SerialException or OSError closes the port; it is reopened - the port only - with a
+- **port failure:** a SerialException, OSError or termios.error closes the port; it is reopened - the port only - with a
   backoff (2 s doubling to 60 s), and requests fail fast with BusUnavailable meanwhile;
 - **stats and health:** counters and the age of the last success;
 - **an action with the port closed** (`reopen`, `with_port_closed`): between two transactions, for the self-recovery
@@ -24,6 +24,7 @@ ModbusBus. It guarantees what each caller used to have to remember itself:
 """
 import itertools
 import queue
+import termios
 import threading
 import time
 from concurrent.futures import Future
@@ -36,6 +37,11 @@ from logger import log
 
 HIGH = 0
 NORMAL = 10
+
+
+# A failed port: pyserial's own error, the OS's, and termios.error, which is neither (an adapter reset or unplugged
+# mid-read makes pyserial's tcflush raise it with EIO; 2026-11-23 it ended em340d).
+PORT_ERRORS = (serial.SerialException, OSError, termios.error)
 
 
 class BusUnavailable(IOError):
@@ -200,7 +206,7 @@ class ModbusBus:
                     log.debug(f"Modbus slave {req.slave}: {exc}; retrying once")
                     continue
                 raise
-            except (serial.SerialException, OSError) as exc:
+            except PORT_ERRORS as exc:
                 self._last_end = self.clock()
                 self._port_failed(exc)
                 raise BusUnavailable(f"{self.port}: {exc}") from exc
@@ -221,7 +227,7 @@ class ModbusBus:
                                      f"next attempt in {self._port_down_until - self.clock():.1f} s")
             try:
                 inst = self._factory(self.port, slave)
-            except (serial.SerialException, OSError) as exc:
+            except PORT_ERRORS as exc:
                 self._backoff = min(self._backoff * 2, self._backoff_max)
                 self._port_down_until = self.clock() + self._backoff
                 raise BusUnavailable(f"{self.port} not reopened: {exc}; next attempt in {self._backoff:.0f} s") from exc
@@ -234,7 +240,7 @@ class ModbusBus:
         if inst is None:
             try:
                 inst = self._instruments[slave] = self._factory(self.port, slave)
-            except (serial.SerialException, OSError) as exc:
+            except PORT_ERRORS as exc:
                 self._port_failed(exc)
                 raise BusUnavailable(f"{self.port}: {exc}") from exc
         return inst
