@@ -20,8 +20,12 @@ from dateutil import tz
 from config_loader import load_sensors
 from em340_config_manager import EM340ConfigManager, write_enabled_from_env
 from energy import EnergyReader, QuarterHourSnapshots, clock_synchronized, snapshot_payload, wall_clock
+import minimalmodbus
+from status import FAULTS, OFFLINE, StatusTracker, diagnose, discovery_messages
 import health
+import usb_reset
 from logger import log
+from recovery import Recovery
 from modbus_bus import HIGH, BusUnavailable, ModbusBus, serial_instrument_factory
 
 # Base directory of the project (parent of src/)
@@ -96,6 +100,15 @@ def decode_value(sensor, values):
     return _words(values[:count], signed_bits) * float(sensor['multiply'])
 
 
+def _error_kind(err) -> str:
+    """A failed read's kind (status.FAULTS)."""
+    if isinstance(err, minimalmodbus.NoResponseError) or isinstance(err, TimeoutError):
+        return 'no_answer'
+    if isinstance(err, minimalmodbus.SlaveReportedException):
+        return 'meter_error'
+    return 'invalid'                                  # CRC, framing, a short answer
+
+
 class EM340:
     def __init__(self):
         log.info('Initializing EM340 ModBus to MQTT Gateway')
@@ -112,6 +125,11 @@ class EM340:
         self.mqtt_username = os.getenv('MQTT_USERNAME', '')
         self.mqtt_password = os.getenv('MQTT_PASSWORD', '')
         self.mqtt_topic_base = os.getenv('MQTT_TOPIC', 'em340')
+        self.ha_discovery_prefix = os.getenv('HA_DISCOVERY_PREFIX', 'homeassistant')   # empty: no discovery
+        self.status = StatusTracker()
+        self.last_poll_errors = []                 # the kinds of error of the last poll (status.FAULTS)
+        self.fault_shown = 'unset'                 # the fault last published on <topic>/fault
+        self.fault_since = None
 
         log.info(
             f'ModBus configuration: device={self.device}, address={self.modbus_address}, '
@@ -131,6 +149,8 @@ class EM340:
         self.bus = ModbusBus(self.device, turnaround_s=self.t_delay_seconds,
                              instrument_factory=serial_instrument_factory(timeout_s=0.5))
         self.bus.start()
+        # A silent bus: reopen the port, then reset the adapter on the USB bus (recovery.py)
+        self.recovery = Recovery(reopen=self.bus.reopen, usb_reset=self._reset_adapter)
 
         self._initialize_mqtt()
         self._initialize_config_manager()
@@ -154,7 +174,11 @@ class EM340:
         self.mqtt_client.on_disconnect = self.on_mqtt_disconnect
         self.mqtt_client.reconnect_delay_set(min_delay=2, max_delay=30)
         self.topic = f'{self.mqtt_topic_base}/{self.serial_number}'
-        log.info(f'MQTT topic configured: {self.topic}')
+        self.status_topic = f'{self.topic}/status'
+        self.fault_topic = f'{self.topic}/fault'
+        # em340d gone (crash, power, network): the broker sets the meter offline
+        self.mqtt_client.will_set(self.status_topic, OFFLINE, qos=1, retain=True)
+        log.info(f'MQTT topic configured: {self.topic} (status {self.status_topic})')
         self.mqtt_client.loop_start()
         try:
             self.mqtt_client.connect(self.mqtt_broker, self.mqtt_port)
@@ -184,6 +208,11 @@ class EM340:
     def on_mqtt_connect(self, client, userdata, flags, reason_code, properties=None):
         if reason_code == 0:
             log.info('Connected to MQTT broker.')
+            for topic, payload in discovery_messages(self.ha_discovery_prefix, self.topic, self.status_topic,
+                                                     self.serial_number):
+                client.publish(topic, payload, qos=1, retain=True)
+            if self.status.current is not None:          # the last verdict again (the will may have replaced it)
+                client.publish(self.status_topic, self.status.current, qos=1, retain=True)
         else:
             log.error(f'Failed to connect to MQTT broker, return code {reason_code}')
 
@@ -225,9 +254,46 @@ class EM340:
         data['total_energy_import'] = imp
         data['total_energy_export'] = exp
 
+    def _publish_status(self, data):
+        """The meter's own status, retained: online while it answers, offline after a few polls without a reading;
+        and why, on <topic>/fault (retained): the adapter, or the meter behind it (status.FAULTS)."""
+        got_readings = bool(data)
+        new = self.status.update(got_readings)
+        if new is not None:
+            (log.warning if new == OFFLINE else log.info)(f'Meter {new}')
+            self._publish(self.status_topic, new)
+        if self.status.current is None:
+            return
+        port_exists = self._port_exists()
+        fault = diagnose(got_readings, self.last_poll_errors, port_exists) \
+            if self.status.current == OFFLINE else None
+        step = self.recovery.update(fault, port_exists)
+        if fault != self.fault_shown or step is not None:
+            if fault != self.fault_shown:
+                self.fault_since = datetime.now(tz=tz.tzlocal()).isoformat()
+                if fault:
+                    log.warning(f'Meter offline - {fault}: {FAULTS[fault]} (port {self.device})')
+            self.fault_shown = fault
+            self._publish(self.fault_topic, json.dumps({
+                'fault': fault, 'detail': FAULTS.get(fault), 'port': self.device, 'since': self.fault_since,
+                'recovery': self.recovery.last_action, 'recovered_by': self.recovery.recovered_by}))
+
+    def _reset_adapter(self):
+        """Reset the USB-RS485 adapter with the port closed; reopened once it is back (a few seconds)."""
+        node = self.bus.with_port_closed(lambda: usb_reset.reset(self.device), reopen_in_s=5.0)
+        log.warning(f'USB-RS485 adapter reset ({node})')
+
+    def _publish(self, topic, payload):
+        try:
+            self.mqtt_client.publish(topic, payload, qos=1, retain=True)
+        except Exception as e:
+            log.error(f'Error publishing {topic}: {e}')
+
     def _write_health(self):
         try:
-            health.write(health.HEALTH_FILE, self.bus)
+            health.write(health.HEALTH_FILE, self.bus,
+                         extra={'fault': None if self.fault_shown == 'unset' else self.fault_shown,
+                                'recovery': dict(self.recovery.counts, recovered_by=self.recovery.recovered_by)})
         except OSError as err:
             log.warning(f'Health file not written: {err}')
 
@@ -238,9 +304,14 @@ class EM340:
 
     # --- the regular poll --------------------------------------------------------------------------------
 
+    def _port_exists(self) -> bool:
+        return os.path.exists(self.device)
+
     def poll_once(self, blocks) -> dict:
-        """Read every block through the bus; a block that fails is left out of this message."""
-        data = {}
+        """Read every block through the bus; a block that fails is left out of this message. The kinds of error are
+        kept in last_poll_errors, to tell the adapter from the meter behind it."""
+        data, errors = {}, []
+        self.last_poll_errors = errors
         for block in blocks:
             start, count = block_span(block)
             try:
@@ -248,9 +319,11 @@ class EM340:
                 if values is None or len(values) != count:
                     raise ValueError(f'expected {count} values, got {len(values) if values else 0}')
             except BusUnavailable as err:
+                errors.append('adapter')
                 log.error(f'Modbus bus unavailable: {err}')     # the bus reopens the port by itself
                 break
             except (IOError, ValueError, TimeoutError) as err:
+                errors.append(_error_kind(err))
                 log.error(f'Block 0x{start:04X} ({count} registers) not read: {err}')
                 continue
             for sensor in block:
@@ -274,6 +347,7 @@ class EM340:
             while True:
                 self._publish_due_snapshot()
                 data = self.poll_once(blocks)
+                self._publish_status(data)
                 self._add_fine_totals(data)
                 data['last_seen'] = datetime.now(tz=tz.tzlocal()).isoformat()
                 try:
@@ -286,6 +360,7 @@ class EM340:
                 self._sleep_until_next_cycle()
         except KeyboardInterrupt:
             log.info('Keyboard interrupt detected. Exiting...')
+            self.mqtt_client.publish(self.status_topic, OFFLINE, qos=1, retain=True)
             self.config_manager.stop_config_service()
             self.bus.stop()
 
